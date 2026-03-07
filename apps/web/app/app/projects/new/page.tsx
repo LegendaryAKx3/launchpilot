@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { useRouter } from "next/navigation";
 
-import { env } from "@/lib/env";
+import { apiFetch } from "@/lib/api";
 
 export default function NewProjectPage() {
   const router = useRouter();
@@ -32,9 +32,8 @@ export default function NewProjectPage() {
 
             setSubmitting(true);
             try {
-              const response = await fetch(`${env.apiBaseUrl}/projects`, {
+              const payload = await apiFetch<{ slug?: string }>("/projects", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   name,
                   summary,
@@ -42,13 +41,12 @@ export default function NewProjectPage() {
                 })
               });
 
-              if (!response.ok) {
+              if (!payload) {
                 setError("Project creation failed.");
                 return;
               }
 
-              const payload = await response.json();
-              const slug = payload?.data?.slug as string | undefined;
+              const slug = payload.slug;
               const fallbackSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "project";
               router.push(`/app/projects/${slug ?? fallbackSlug}`);
             } catch {
