@@ -59,7 +59,7 @@ export default function LoginPage() {
 
           <div className="space-y-3">
             <Link
-              href={authConfigured ? "/auth/login?connection=github" : "/app"}
+              href={authConfigured ? "/auth/login?connection=github&returnTo=%2Fapp%2Fprojects" : "/app"}
               className="flex items-center justify-center gap-3 rounded-lg border border-edge-subtle bg-surface-elevated px-4 py-2.5 text-sm font-medium text-fg-secondary transition-colors hover:border-edge-muted hover:text-fg-primary"
             >
               <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
@@ -68,7 +68,7 @@ export default function LoginPage() {
               Continue with GitHub
             </Link>
             <Link
-              href={authConfigured ? "/auth/login?connection=google-oauth2" : "/app"}
+              href={authConfigured ? "/auth/login?connection=google-oauth2&returnTo=%2Fapp%2Fprojects" : "/app"}
               className="flex items-center justify-center gap-3 rounded-lg border border-edge-subtle bg-surface-elevated px-4 py-2.5 text-sm font-medium text-fg-secondary transition-colors hover:border-edge-muted hover:text-fg-primary"
             >
               <svg className="h-5 w-5" viewBox="0 0 24 24">
@@ -92,7 +92,7 @@ export default function LoginPage() {
               Continue with Google
             </Link>
             <Link
-              href={authConfigured ? "/auth/login" : "/app"}
+              href={authConfigured ? "/auth/login?returnTo=%2Fapp%2Fprojects" : "/app"}
               className="flex items-center justify-center gap-3 rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

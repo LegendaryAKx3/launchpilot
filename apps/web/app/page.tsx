@@ -30,7 +30,7 @@ export default function LandingPage() {
             Log in
           </Link>
           <Link
-            href={authEnabled ? "/auth/login" : "/app"}
+            href={authEnabled ? "/auth/login?returnTo=%2Fapp%2Fprojects" : "/app"}
             className="rounded-lg bg-accent px-4 py-2 font-medium text-white transition-colors hover:bg-accent-hover"
           >
             {authEnabled ? "Get Started" : "Open App"}
@@ -53,7 +53,7 @@ export default function LandingPage() {
           </p>
           <div className="flex gap-3 pt-2">
             <Link
-              href={authEnabled ? "/auth/login" : "/app"}
+              href={authEnabled ? "/auth/login?returnTo=%2Fapp%2Fprojects" : "/app"}
               className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-accent/25 transition-all hover:bg-accent-hover hover:shadow-xl hover:shadow-accent/30"
             >
               {authEnabled ? "Start with Auth0" : "Start in Dev Mode"}
