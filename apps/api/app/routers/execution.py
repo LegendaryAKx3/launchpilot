@@ -15,6 +15,7 @@ from app.schemas.execution import AssetGenerationRequest, ContactsUpsertRequest,
 from app.security.auth0 import CurrentUser
 from app.security.permissions import require_scope
 from app.services.audit_service import AuditService
+from app.services.backboard_project_state_service import BackboardProjectStateService
 from app.services.backboard_stage_service import BackboardStageService
 from app.services.execution_service import ExecutionService
 from app.services.project_service import ProjectService
@@ -82,6 +83,12 @@ def generate_execution_plan(
     )
 
     db.commit()
+    BackboardProjectStateService(db).sync_after_action(
+        project_id=str(project_id),
+        reason="execution.plan",
+        stage="execution",
+        extra={"mode": payload.mode, "used_advice": bool(payload.advice), "launch_plan_id": str(plan.id)},
+    )
     return success({"launch_plan_id": str(plan.id), "agent_trace": trace, **output})
 
 
@@ -152,6 +159,12 @@ def generate_assets(
         metadata={"agent_trace": trace, "mode": payload.mode, "advice": payload.advice, "count": len(created_assets)},
     )
     db.commit()
+    BackboardProjectStateService(db).sync_after_action(
+        project_id=str(project_id),
+        reason="execution.assets",
+        stage="execution",
+        extra={"mode": payload.mode, "used_advice": bool(payload.advice), "asset_count": len(created_assets)},
+    )
     return success(
         {
             "assets": created_assets,
@@ -189,6 +202,12 @@ def upsert_contacts(
         db.flush()
         inserted_ids.append(str(row.id))
     db.commit()
+    BackboardProjectStateService(db).sync_after_action(
+        project_id=str(project_id),
+        reason="execution.contacts",
+        stage="execution",
+        extra={"contact_ids": inserted_ids},
+    )
     return success({"contact_ids": inserted_ids})
 
 
@@ -217,6 +236,12 @@ def prepare_email_batch(
 
     drafts = output.get("drafts", [])
     if not drafts:
+        BackboardProjectStateService(db).sync_after_action(
+            project_id=str(project_id),
+            reason="execution.email_prepare_empty",
+            stage="execution",
+            extra={"mode": payload.mode, "used_advice": bool(payload.advice)},
+        )
         return success(
             {
                 "prepared": False,
@@ -231,6 +256,12 @@ def prepare_email_batch(
 
     valid_drafts = [item for item in drafts if item.get("contact_id") and item.get("body")]
     if not valid_drafts:
+        BackboardProjectStateService(db).sync_after_action(
+            project_id=str(project_id),
+            reason="execution.email_prepare_invalid",
+            stage="execution",
+            extra={"mode": payload.mode, "used_advice": bool(payload.advice)},
+        )
         return success(
             {
                 "prepared": False,
@@ -282,6 +313,12 @@ def prepare_email_batch(
     )
 
     db.commit()
+    BackboardProjectStateService(db).sync_after_action(
+        project_id=str(project_id),
+        reason="execution.email_prepare",
+        stage="execution",
+        extra={"mode": payload.mode, "used_advice": bool(payload.advice), "batch_id": str(batch.id)},
+    )
     return success(
         {
             "batch_id": str(batch.id),
@@ -336,6 +373,12 @@ def send_email_batch(
     result = ExecutionService(db).send_email_batch(project_id, batch_id)
     AuditService(db).log(project_id, "system", "api", "execution.email_batch_sent", "outbound_batch", str(batch_id))
     db.commit()
+    BackboardProjectStateService(db).sync_after_action(
+        project_id=str(project_id),
+        reason="execution.email_send",
+        stage="execution",
+        extra={"batch_id": str(batch_id)},
+    )
     return success(result)
 
 

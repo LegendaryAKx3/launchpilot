@@ -15,6 +15,7 @@ from app.schemas.research import ResearchRunRequest
 from app.security.auth0 import CurrentUser
 from app.security.permissions import require_scope
 from app.services.audit_service import AuditService
+from app.services.backboard_project_state_service import BackboardProjectStateService
 from app.services.backboard_stage_service import BackboardStageService
 from app.services.memory_service import upsert_project_memory
 from app.services.project_service import ProjectService
@@ -121,6 +122,12 @@ def run_research(
     )
 
     db.commit()
+    BackboardProjectStateService(db).sync_after_action(
+        project_id=str(project_id),
+        reason="research.run",
+        stage="research",
+        extra={"mode": payload.mode, "used_advice": bool(payload.advice)},
+    )
 
     return success(
         {

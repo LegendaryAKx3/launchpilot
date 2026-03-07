@@ -10,6 +10,7 @@ from app.routers.utils import success
 from app.schemas.approval import ApprovalDecisionRequest
 from app.security.auth0 import CurrentUser, get_current_user
 from app.security.permissions import require_scope
+from app.services.backboard_project_state_service import BackboardProjectStateService
 
 router = APIRouter(tags=["approvals"])
 
@@ -69,6 +70,12 @@ def approve(
         approval.reason = payload.reason
 
     db.commit()
+    BackboardProjectStateService(db).sync_after_action(
+        project_id=str(approval.project_id),
+        reason="approval.approve",
+        stage="approvals",
+        extra={"approval_id": str(approval.id), "status": approval.status},
+    )
     return success({"approval_id": str(approval.id), "status": approval.status})
 
 
@@ -88,4 +95,10 @@ def reject(
     if payload.reason:
         approval.reason = payload.reason
     db.commit()
+    BackboardProjectStateService(db).sync_after_action(
+        project_id=str(approval.project_id),
+        reason="approval.reject",
+        stage="approvals",
+        extra={"approval_id": str(approval.id), "status": approval.status},
+    )
     return success({"approval_id": str(approval.id), "status": approval.status})

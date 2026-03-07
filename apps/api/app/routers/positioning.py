@@ -14,6 +14,7 @@ from app.schemas.positioning import PositioningRunRequest
 from app.security.auth0 import CurrentUser
 from app.security.permissions import require_scope
 from app.services.audit_service import AuditService
+from app.services.backboard_project_state_service import BackboardProjectStateService
 from app.services.backboard_stage_service import BackboardStageService
 from app.services.memory_service import upsert_project_memory
 from app.services.project_service import ProjectService
@@ -70,6 +71,12 @@ def run_positioning(
     )
 
     db.commit()
+    BackboardProjectStateService(db).sync_after_action(
+        project_id=str(project_id),
+        reason="positioning.run",
+        stage="positioning",
+        extra={"mode": payload.mode, "used_advice": bool(payload.advice), "version_id": str(version.id)},
+    )
     return success({"positioning_version_id": str(version.id), "agent_trace": trace, **output})
 
 
@@ -145,4 +152,10 @@ def select_positioning_version(
     }
     upsert_project_memory(db, project_id, "selected_positioning", memory_value, "decision", "user")
     db.commit()
+    BackboardProjectStateService(db).sync_after_action(
+        project_id=str(project_id),
+        reason="positioning.select",
+        stage="positioning",
+        extra={"version_id": str(version.id)},
+    )
     return success({"selected_version_id": str(version.id)})

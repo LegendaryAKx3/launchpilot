@@ -12,6 +12,7 @@ from app.schemas.project import ProjectBriefUpsertRequest, ProjectCreateRequest,
 from app.security.auth0 import CurrentUser, get_current_user
 from app.security.permissions import require_scope
 from app.services.audit_service import AuditService
+from app.services.backboard_project_state_service import BackboardProjectStateService
 from app.services.project_service import ProjectService
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -82,6 +83,12 @@ def create_project(
     AuditService(db).log(project.id, "system", None, "project.created", "project", str(project.id))
 
     db.commit()
+    BackboardProjectStateService(db).sync_after_action(
+        project_id=str(project.id),
+        reason="project.create",
+        stage="idea",
+        extra={"slug": project.slug},
+    )
     return success({"project_id": str(project.id), "slug": project.slug})
 
 
@@ -156,6 +163,12 @@ def upsert_project_brief(
         )
         db.add(brief)
     db.commit()
+    BackboardProjectStateService(db).sync_after_action(
+        project_id=str(project_id),
+        reason="project.brief_upsert",
+        stage="idea",
+        extra={"brief_id": str(brief.id)},
+    )
     return success({"brief_id": str(brief.id)})
 
 
@@ -176,6 +189,12 @@ def add_project_source(
     )
     db.add(source)
     db.commit()
+    BackboardProjectStateService(db).sync_after_action(
+        project_id=str(project_id),
+        reason="project.source_add",
+        stage="idea",
+        extra={"source_id": str(source.id), "source_type": source.source_type},
+    )
     return success({"source_id": str(source.id)})
 
 

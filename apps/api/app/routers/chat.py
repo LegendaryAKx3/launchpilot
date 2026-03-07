@@ -9,6 +9,7 @@ from app.models.chat import AgentChatMessage
 from app.routers.utils import success
 from app.security.auth0 import CurrentUser
 from app.security.permissions import require_scope
+from app.services.backboard_project_state_service import BackboardProjectStateService
 from app.services.project_service import ProjectService
 
 router = APIRouter(prefix="/projects/{project_id}/chat", tags=["chat"])
@@ -87,6 +88,12 @@ def save_chat_messages(
         })
 
     db.commit()
+    BackboardProjectStateService(db).sync_after_action(
+        project_id=str(project_id),
+        reason=f"chat.save.{agent_type}",
+        stage=agent_type,
+        extra={"message_count": len(saved)},
+    )
 
     return success({"messages": saved})
 
@@ -106,5 +113,11 @@ def clear_chat_messages(
     ).delete()
 
     db.commit()
+    BackboardProjectStateService(db).sync_after_action(
+        project_id=str(project_id),
+        reason=f"chat.clear.{agent_type}",
+        stage=agent_type,
+        extra={"cleared": True},
+    )
 
     return success({"cleared": True})
