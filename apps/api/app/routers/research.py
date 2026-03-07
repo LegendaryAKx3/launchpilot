@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
+from typing import Any
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
@@ -8,11 +10,13 @@ from sqlalchemy.orm import Session
 from app.agents.research_agent import run_research_agent
 from app.agents.shared_context import build_project_context
 from app.db.session import get_db
+from app.integrations.auth0_github_connector import Auth0GithubConnector
 from app.integrations.backboard_client import BackboardRequestError
+from app.integrations.github_client import GitHubClient
 from app.models.research import Competitor, OpportunityWedge, PainPointCluster, ResearchRun
 from app.routers.utils import success
 from app.schemas.research import ResearchRunRequest
-from app.security.auth0 import CurrentUser
+from app.security.auth0 import CurrentUser, get_current_user
 from app.security.permissions import require_scope
 from app.services.audit_service import AuditService
 from app.services.backboard_stage_service import BackboardStageService
@@ -20,18 +24,206 @@ from app.services.memory_service import upsert_project_memory
 from app.services.project_service import ProjectService
 
 router = APIRouter(prefix="/projects/{project_id}/research", tags=["research"])
+TEXT_FILE_EXTENSIONS = {
+    ".md",
+    ".txt",
+    ".py",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".jsx",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".ini",
+    ".sql",
+}
+
+
+def _is_text_candidate(path: str) -> bool:
+    lowered = path.lower()
+    return any(lowered.endswith(ext) for ext in TEXT_FILE_EXTENSIONS)
+
+
+def _build_verified_github_context(
+    *,
+    access_token: str,
+    owner: str,
+    repo: str,
+    branch: str | None,
+    path: str | None,
+    max_files: int,
+    max_file_chars: int,
+) -> dict[str, Any]:
+    client = GitHubClient()
+    try:
+        repo_info = client.get_repo(access_token, owner, repo)
+    except httpx.HTTPStatusError as exc:
+        code = exc.response.status_code if exc.response else status.HTTP_502_BAD_GATEWAY
+        if code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "GITHUB_REPO_UNAVAILABLE",
+                    "message": "Repository was not found or is not accessible with current GitHub authorization.",
+                },
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"code": "GITHUB_VERIFY_FAILED", "message": "Failed verifying repository with GitHub."},
+        ) from exc
+
+    selected_branch = (branch or "").strip() or (repo_info.get("default_branch") or "")
+    if selected_branch:
+        try:
+            branch_info = client.get_branch(access_token, owner, repo, selected_branch)
+        except httpx.HTTPStatusError as exc:
+            code = exc.response.status_code if exc.response else status.HTTP_502_BAD_GATEWAY
+            if code == status.HTTP_404_NOT_FOUND:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={"code": "GITHUB_BRANCH_NOT_FOUND", "message": f"Branch '{selected_branch}' not found."},
+                ) from exc
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"code": "GITHUB_VERIFY_FAILED", "message": "Failed verifying branch with GitHub."},
+            ) from exc
+    else:
+        branch_info = {"name": None, "sha": None}
+
+    selected_path = (path or "").strip().lstrip("/")
+    try:
+        entries = client.list_path_contents(
+            access_token,
+            owner,
+            repo,
+            path=selected_path,
+            ref=selected_branch or None,
+        )
+    except httpx.HTTPStatusError as exc:
+        code = exc.response.status_code if exc.response else status.HTTP_502_BAD_GATEWAY
+        if code == status.HTTP_404_NOT_FOUND:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "GITHUB_PATH_NOT_FOUND",
+                    "message": f"Path '{selected_path or '/'}' not found in repository.",
+                },
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"code": "GITHUB_VERIFY_FAILED", "message": "Failed verifying repository path with GitHub."},
+        ) from exc
+
+    file_entries = [entry for entry in entries if entry.get("type") == "file" and _is_text_candidate(entry.get("path", ""))]
+    selected_files = file_entries[:max_files]
+    file_snippets: list[dict[str, Any]] = []
+    for entry in selected_files:
+        file_path = entry.get("path")
+        if not file_path:
+            continue
+        text = client.get_file_text(
+            access_token,
+            owner,
+            repo,
+            path=file_path,
+            ref=selected_branch or None,
+            max_chars=max_file_chars,
+        )
+        if not text:
+            continue
+        file_snippets.append(
+            {
+                "path": file_path,
+                "size": entry.get("size"),
+                "snippet": text,
+            }
+        )
+
+    if not file_snippets:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "GITHUB_NO_CONTEXT_FILES",
+                "message": "No readable text files found at the specified repository path.",
+            },
+        )
+
+    return {
+        "verified_repo": True,
+        "repo": repo_info,
+        "branch": branch_info,
+        "path": selected_path or "/",
+        "files": file_snippets,
+        "files_considered": len(file_entries),
+        "files_included": len(file_snippets),
+    }
 
 
 @router.post("/run")
 def run_research(
     project_id: UUID,
     payload: ResearchRunRequest,
+    current_user: CurrentUser = Depends(get_current_user),
     _scope: CurrentUser = Depends(require_scope("research:run")),
     db: Session = Depends(get_db),
 ):
     project = ProjectService(db).get_project_or_404(project_id)
 
     context = build_project_context(db, project_id)
+    extra_task_instructions: str | None = None
+    github_repo_context = {"included": False, "reason": "not_requested"}
+    if payload.github_repo:
+        if "repo:read" not in current_user.scopes:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "MISSING_SCOPE", "message": "repo:read scope is required for GitHub repo context."},
+            )
+        connector = Auth0GithubConnector()
+        token = connector.github_access_token(current_user.sub)
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "GITHUB_NOT_LINKED", "message": "GitHub is not linked for this user."},
+            )
+
+        github_repo_context = _build_verified_github_context(
+            access_token=token,
+            owner=payload.github_repo.owner,
+            repo=payload.github_repo.repo,
+            branch=payload.github_repo.branch,
+            path=payload.github_repo.path,
+            max_files=payload.github_repo.max_files,
+            max_file_chars=payload.github_repo.max_file_chars,
+        )
+        context["github_repo"] = github_repo_context
+        extra_task_instructions = (
+            "Use only the verified GitHub repository context in github_repo.files. "
+            "If context is missing for a requested file, state that limitation explicitly."
+        )
+
+    if "repo:read" in current_user.scopes:
+        connector = Auth0GithubConnector()
+        token = connector.github_access_token(current_user.sub)
+        if token:
+            try:
+                repos = GitHubClient().list_user_repos(token, per_page=20)
+                github_repo_context = {
+                    "included": True,
+                    "repo_count": len(repos),
+                }
+                context["github"] = {
+                    "repos": repos,
+                    "note": "GitHub repositories linked through Auth0 identity.",
+                }
+            except Exception as exc:  # noqa: BLE001
+                github_repo_context = {"included": False, "reason": f"github_fetch_failed:{exc}"}
+        else:
+            github_repo_context = {"included": False, "reason": "github_not_linked"}
+    else:
+        github_repo_context = {"included": False, "reason": "missing_repo_read_scope"}
+
     if payload.pinned_wedge_ids:
         context["pinned_wedge_ids"] = [str(item) for item in payload.pinned_wedge_ids]
     try:
@@ -41,6 +233,7 @@ def run_research(
             project_id=str(project_id),
             advice=payload.advice,
             mode=payload.mode,
+            extra_task_instructions=extra_task_instructions,
         )
     except BackboardRequestError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Backboard research failed: {exc}")
@@ -117,7 +310,12 @@ def run_research(
         "research.generated",
         "research_run",
         str(run.id),
-        metadata={"agent_trace": trace, "mode": payload.mode, "advice": payload.advice},
+        metadata={
+            "agent_trace": trace,
+            "mode": payload.mode,
+            "advice": payload.advice,
+            "github_repo_context": github_repo_context,
+        },
     )
 
     db.commit()
@@ -138,6 +336,7 @@ def run_research(
             "next_step_suggestion": output.get("next_step_suggestion", ""),
             "should_move_to_next_stage": bool(output.get("should_move_to_next_stage")),
             "next_stage": output.get("next_stage", "research"),
+            "github_repo_context": github_repo_context,
         }
     )
 
@@ -146,10 +345,11 @@ def run_research(
 def advise_research(
     project_id: UUID,
     payload: ResearchRunRequest,
+    current_user: CurrentUser = Depends(get_current_user),
     _scope: CurrentUser = Depends(require_scope("research:run")),
     db: Session = Depends(get_db),
 ):
-    return run_research(project_id=project_id, payload=payload, _scope=_scope, db=db)
+    return run_research(project_id=project_id, payload=payload, current_user=current_user, _scope=_scope, db=db)
 
 
 @router.get("")

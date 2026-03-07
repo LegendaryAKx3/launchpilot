@@ -1,4 +1,4 @@
-from app.routers import approvals, execution, health, me, positioning, projects, research
+from app.routers import approvals, connectors, execution, health, me, positioning, projects, research
 
 __all__ = [
     "health",
@@ -8,4 +8,5 @@ __all__ = [
     "positioning",
     "execution",
     "approvals",
+    "connectors",
 ]

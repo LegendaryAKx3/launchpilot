@@ -1,6 +1,11 @@
 import { auth0 } from "@/lib/auth0";
 import { env } from "@/lib/env";
 
+export interface ApiErrorPayload {
+  code: string;
+  message: string;
+}
+
 // Client-side token fetch
 async function getClientAccessToken(): Promise<string | null> {
   if (typeof window === "undefined") {
@@ -63,6 +68,39 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T |
     return payload.data as T;
   } catch {
     return null;
+  }
+}
+
+export async function apiFetchWithError<T>(
+  path: string,
+  init?: RequestInit
+): Promise<{ data: T | null; error: ApiErrorPayload | null; status: number | null }> {
+  try {
+    const token = await getClientAccessToken();
+    const headers = new Headers(init?.headers ?? {});
+    if (init?.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+
+    const response = await fetch(`${env.apiBaseUrl}${path}`, {
+      ...init,
+      headers,
+      cache: "no-store"
+    });
+    const status = response.status;
+    const payload = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      const error = payload?.error as ApiErrorPayload | undefined;
+      return { data: null, error: error ?? null, status };
+    }
+
+    return { data: (payload?.data as T | undefined) ?? null, error: null, status };
+  } catch {
+    return { data: null, error: { code: "NETWORK_ERROR", message: "Request failed. Please try again." }, status: null };
   }
 }
 

@@ -16,8 +16,12 @@ class Settings(BaseSettings):
     # - auth0: strict JWT verification via AUTH0_ISSUER/AUTH0_AUDIENCE
     auth_mode: str = "dev"
     app_jwt_namespace: str = Field(default="https://growthlaunchpad.app")
+    auth0_domain: str | None = None
     auth0_issuer: str | None = None
     auth0_audience: str | None = None
+    auth0_m2m_client_id: str | None = None
+    auth0_m2m_client_secret: str | None = None
+    auth0_management_audience: str | None = None
 
     supabase_db_url: str = Field(default="postgresql+psycopg://postgres:postgres@localhost:5432/postgres")
 

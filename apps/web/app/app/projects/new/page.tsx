@@ -4,13 +4,14 @@ import { useState } from "react";
 
 import { useRouter } from "next/navigation";
 
-import { apiFetch } from "@/lib/api";
+import { apiFetchWithError } from "@/lib/api";
 
 export default function NewProjectPage() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [summary, setSummary] = useState("");
   const [goal, setGoal] = useState("");
+  const [repoInput, setRepoInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -32,21 +33,22 @@ export default function NewProjectPage() {
 
             setSubmitting(true);
             try {
-              const payload = await apiFetch<{ slug?: string }>("/projects", {
+              const response = await apiFetchWithError<{ slug?: string }>("/projects", {
                 method: "POST",
                 body: JSON.stringify({
                   name,
                   summary,
-                  goal
+                  goal,
+                  repo_url: repoInput.trim() || null
                 })
               });
 
-              if (!payload) {
-                setError("Project creation failed.");
+              if (!response.data) {
+                setError(response.error?.message ?? "Project creation failed.");
                 return;
               }
 
-              const slug = payload.slug;
+              const slug = response.data.slug;
               const fallbackSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "project";
               router.push(`/app/projects/${slug ?? fallbackSlug}`);
             } catch {
@@ -85,6 +87,19 @@ export default function NewProjectPage() {
               className="w-full rounded-lg border border-edge-subtle bg-surface-elevated px-3 py-2.5 text-sm text-fg-primary placeholder:text-fg-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
               placeholder="Get 10 users in 2 weeks"
             />
+          </label>
+
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-fg-secondary">GitHub Repository (optional)</span>
+            <input
+              value={repoInput}
+              onChange={(e) => setRepoInput(e.target.value)}
+              className="w-full rounded-lg border border-edge-subtle bg-surface-elevated px-3 py-2.5 text-sm text-fg-primary placeholder:text-fg-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+              placeholder="owner/repo or https://github.com/owner/repo"
+            />
+            <p className="mt-1 text-xs text-fg-faint">
+              If provided, we verify access against your Auth0-linked GitHub account before creating the project.
+            </p>
           </label>
 
           <div className="pt-2">

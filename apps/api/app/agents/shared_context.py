@@ -23,6 +23,7 @@ def build_project_context(db: Session, project_id) -> dict:
         .all()
     )
     contacts = db.query(Contact).filter(Contact.project_id == project_id).all()
+    github_snapshot = next((m.memory_value for m in memory if m.memory_key == "github_repos_snapshot"), None)
 
     return {
         "project": {
@@ -55,4 +56,5 @@ def build_project_context(db: Session, project_id) -> dict:
             for v in positioning
         ],
         "contacts": [{"id": str(c.id), "email": c.email, "name": c.name, "segment": c.segment} for c in contacts],
+        "github": github_snapshot or {"repos": [], "count": 0},
     }

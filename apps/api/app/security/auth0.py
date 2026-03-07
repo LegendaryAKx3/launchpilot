@@ -72,6 +72,9 @@ def _dev_user() -> CurrentUser:
             "approval:read",
             "approval:write",
             "execution:send",
+            "connector:link",
+            "repo:read",
+            "repo:write",
         },
         allowed_actions=["approve_send", "publish_asset"],
         raw_claims={},
@@ -97,6 +100,9 @@ def get_current_user(
 
     scope_claim = claims.get("scope", "")
     scopes = set(scope_claim.split()) if scope_claim else set()
+    permission_claim = claims.get("permissions", [])
+    if isinstance(permission_claim, list):
+        scopes.update(str(item) for item in permission_claim if isinstance(item, str))
     return CurrentUser(
         sub=claims.get("sub", ""),
         email=claims.get("email"),

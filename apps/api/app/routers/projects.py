@@ -1,9 +1,14 @@
 from uuid import UUID
+from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends
+import httpx
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.integrations.auth0_github_connector import Auth0GithubConnector
+from app.integrations.github_client import GitHubClient
 from app.models.approval import ActivityEvent
 from app.models.project import Project, ProjectBrief, ProjectMemory, ProjectSource
 from app.models.workspace import WorkspaceMember
@@ -15,6 +20,87 @@ from app.services.audit_service import AuditService
 from app.services.project_service import ProjectService
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+def _parse_github_repo_input(raw: str) -> tuple[str, str]:
+    value = (raw or "").strip()
+    if not value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "INVALID_GITHUB_REPO", "message": "Repository cannot be empty."},
+        )
+
+    if value.startswith("http://") or value.startswith("https://"):
+        parsed = urlparse(value)
+        host = (parsed.netloc or "").lower()
+        if host not in {"github.com", "www.github.com"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "INVALID_GITHUB_REPO", "message": "Only github.com repository URLs are supported."},
+            )
+        parts = [part for part in parsed.path.strip("/").split("/") if part]
+        if len(parts) < 2:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "INVALID_GITHUB_REPO", "message": "Repository URL must include owner and repo."},
+            )
+        owner = parts[0]
+        repo = parts[1]
+    else:
+        parts = [part for part in value.strip("/").split("/") if part]
+        if len(parts) != 2:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "INVALID_GITHUB_REPO", "message": "Use owner/repo or a full GitHub URL."},
+            )
+        owner, repo = parts
+
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+    repo = repo.strip()
+    owner = owner.strip()
+    if not owner or not repo:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "INVALID_GITHUB_REPO", "message": "Repository must include valid owner and repo name."},
+        )
+
+    return owner, repo
+
+
+def _verify_github_repo_for_user(current_user: CurrentUser, repo_input: str) -> str:
+    if "repo:read" not in current_user.scopes:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "MISSING_SCOPE", "message": "repo:read scope is required to validate GitHub repositories."},
+        )
+
+    owner, repo = _parse_github_repo_input(repo_input)
+    token = Auth0GithubConnector().github_access_token(current_user.sub)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "GITHUB_NOT_LINKED", "message": "Link your GitHub account before using repository validation."},
+        )
+
+    try:
+        repo_info = GitHubClient().get_repo(token, owner, repo)
+    except httpx.HTTPStatusError as exc:
+        code = exc.response.status_code if exc.response else status.HTTP_502_BAD_GATEWAY
+        if code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "GITHUB_REPO_UNAVAILABLE",
+                    "message": "Repository not found or not accessible for this GitHub account.",
+                },
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"code": "GITHUB_VERIFY_FAILED", "message": "GitHub verification failed. Try again."},
+        ) from exc
+
+    return str(repo_info.get("html_url") or f"https://github.com/{owner}/{repo}")
 
 
 @router.get("")
@@ -61,6 +147,9 @@ def create_project(
     project_service = ProjectService(db)
     actor = project_service.get_or_create_local_user(current_user)
     workspace = project_service.get_or_create_default_workspace(actor)
+    repo_url: str | None = None
+    if payload.repo_url:
+        repo_url = _verify_github_repo_for_user(current_user, payload.repo_url)
 
     slug = project_service.next_available_project_slug(workspace.id, payload.name)
 
@@ -71,7 +160,7 @@ def create_project(
         summary=payload.summary,
         goal=payload.goal,
         website_url=payload.website_url,
-        repo_url=payload.repo_url,
+        repo_url=repo_url,
         target_market_hint=payload.target_market_hint,
         created_by=actor.id,
         stage="idea",

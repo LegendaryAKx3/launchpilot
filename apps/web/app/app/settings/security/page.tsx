@@ -1,8 +1,28 @@
-import { StatCard } from "@/components/ui/stat-card";
+import Link from "next/link";
 
-export default function SecurityCenterPage() {
+import { StatCard } from "@/components/ui/stat-card";
+import { serverApiFetch } from "@/lib/api";
+
+interface GitHubStatusPayload {
+  linked: boolean;
+  provider: string;
+  provider_user_id: string | null;
+  has_access_token: boolean;
+}
+
+interface GitHubLinkPayload {
+  url: string;
+}
+
+export default async function SecurityCenterPage() {
+  const githubStatus = await serverApiFetch<GitHubStatusPayload>("/connectors/github/status");
+  const githubLink = await serverApiFetch<GitHubLinkPayload>("/connectors/github/link-url");
   const linkedAccounts = [
-    { provider: "GitHub", status: "linked", icon: "github" },
+    {
+      provider: "GitHub",
+      status: githubStatus?.linked ? "linked" : "not linked",
+      detail: githubStatus?.has_access_token ? "token available" : "token unavailable",
+    },
     { provider: "Google", status: "linked", icon: "google" },
     { provider: "Passkey", status: "enrolled", icon: "key" }
   ];
@@ -86,13 +106,36 @@ export default function SecurityCenterPage() {
                 className="flex items-center justify-between rounded-lg border border-edge-subtle bg-surface-elevated px-3 py-2 animate-slide-up"
                 style={{ animationDelay: `${index * 50}ms` }}
               >
-                <span className="text-sm text-fg-secondary">{account.provider}</span>
-                <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-400">
-                  {account.status}
-                </span>
+                <div>
+                  <span className="text-sm text-fg-secondary">{account.provider}</span>
+                  {"detail" in account && account.detail ? (
+                    <p className="text-xs text-fg-faint">{account.detail}</p>
+                  ) : null}
+                </div>
+                <div className="text-right">
+                  <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-400">
+                    {account.status}
+                  </span>
+                </div>
               </li>
             ))}
           </ul>
+          <div className="mt-4 rounded-lg border border-edge-subtle bg-surface-elevated p-3">
+            <p className="text-xs text-fg-faint">GitHub Connector</p>
+            <p className="mt-1 text-sm text-fg-secondary">
+              {githubStatus?.linked
+                ? "GitHub is linked. You can fetch repository context in project workflows."
+                : "GitHub is not linked for this account yet."}
+            </p>
+            <div className="mt-3">
+              <Link
+                href={githubLink?.url ?? "/auth/login?connection=github"}
+                className="inline-flex items-center rounded-md bg-accent px-3 py-2 text-xs font-medium text-white"
+              >
+                {githubStatus?.linked ? "Reconnect GitHub" : "Connect GitHub"}
+              </Link>
+            </div>
+          </div>
         </div>
 
         <div className="rounded-xl border border-edge-subtle bg-surface-muted p-5">

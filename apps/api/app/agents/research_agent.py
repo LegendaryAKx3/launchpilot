@@ -11,6 +11,7 @@ def run_research_agent(
     project_id: str,
     advice: str | None = None,
     mode: str = "baseline",
+    extra_task_instructions: str | None = None,
 ) -> tuple[dict, dict]:
     response, trace = backboard.run_json_stage(
         project_id=project_id,
@@ -20,6 +21,7 @@ def run_research_agent(
         context=context,
         advice=advice,
         mode=mode,
+        extra_task_instructions=extra_task_instructions,
     )
     normalized = {
         "project_category": response.get("project_category") or "unknown",

@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging
-from app.routers import approvals, chat, execution, health, me, positioning, projects, research
+from app.routers import approvals, chat, connectors, execution, health, me, positioning, projects, research
 
 configure_logging()
 settings = get_settings()
@@ -47,3 +47,4 @@ app.include_router(positioning.router, prefix="/v1")
 app.include_router(execution.router, prefix="/v1")
 app.include_router(approvals.router, prefix="/v1")
 app.include_router(chat.router, prefix="/v1")
+app.include_router(connectors.router, prefix="/v1")
