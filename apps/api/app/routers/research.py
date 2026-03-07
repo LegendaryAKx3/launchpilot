@@ -1,13 +1,14 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from app.agents.research_agent import run_research_agent
 from app.agents.shared_context import build_project_context
 from app.db.session import get_db
+from app.integrations.backboard_client import BackboardRequestError
 from app.models.research import Competitor, OpportunityWedge, PainPointCluster, ResearchRun
 from app.routers.utils import success
 from app.schemas.research import ResearchRunRequest
@@ -33,13 +34,16 @@ def run_research(
     context = build_project_context(db, project_id)
     if payload.pinned_wedge_ids:
         context["pinned_wedge_ids"] = [str(item) for item in payload.pinned_wedge_ids]
-    output, trace = run_research_agent(
-        context,
-        backboard=BackboardStageService(db),
-        project_id=str(project_id),
-        advice=payload.advice,
-        mode=payload.mode,
-    )
+    try:
+        output, trace = run_research_agent(
+            context,
+            backboard=BackboardStageService(db),
+            project_id=str(project_id),
+            advice=payload.advice,
+            mode=payload.mode,
+        )
+    except BackboardRequestError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Backboard research failed: {exc}")
 
     run = ResearchRun(
         project_id=project_id,
@@ -54,10 +58,13 @@ def run_research(
     db.execute(delete(OpportunityWedge).where(OpportunityWedge.project_id == project_id))
 
     for item in output.get("competitors", []):
+        name = item.get("name")
+        if not name:
+            continue
         db.add(
             Competitor(
                 project_id=project_id,
-                name=item["name"],
+                name=name,
                 positioning=item.get("positioning"),
                 pricing_summary=item.get("pricing_summary"),
                 strengths=item.get("strengths", []),
@@ -66,10 +73,13 @@ def run_research(
         )
 
     for idx, item in enumerate(output.get("pain_point_clusters", []), start=1):
+        label = item.get("label")
+        if not label:
+            continue
         db.add(
             PainPointCluster(
                 project_id=project_id,
-                label=item["label"],
+                label=label,
                 description=item.get("description"),
                 evidence=item.get("evidence", []),
                 rank=idx,
@@ -77,10 +87,13 @@ def run_research(
         )
 
     for item in output.get("opportunity_wedges", []):
+        label = item.get("label")
+        if not label:
+            continue
         db.add(
             OpportunityWedge(
                 project_id=project_id,
-                label=item["label"],
+                label=label,
                 description=item.get("description"),
                 score=item.get("score"),
                 status="candidate",
@@ -97,7 +110,15 @@ def run_research(
     )
 
     project.stage = "research"
-    AuditService(db).log(project_id, "agent", "research_agent", "research.generated", "research_run", str(run.id))
+    AuditService(db).log(
+        project_id,
+        "agent",
+        "research_agent",
+        "research.generated",
+        "research_run",
+        str(run.id),
+        metadata={"agent_trace": trace, "mode": payload.mode, "advice": payload.advice},
+    )
 
     db.commit()
 

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.agents.execution_agent import run_asset_generation_agent, run_email_personalization_agent, run_execution_plan_agent
 from app.agents.shared_context import build_project_context
 from app.db.session import get_db
+from app.integrations.backboard_client import BackboardRequestError
 from app.models.approval import Approval
 from app.models.execution import Asset, Contact, LaunchPlan, LaunchTask, OutboundBatch, OutboundMessage
 from app.routers.utils import success
@@ -33,13 +34,16 @@ def generate_execution_plan(
     context = build_project_context(db, project_id)
     if payload.positioning_version_id:
         context["selected_positioning_version_id"] = str(payload.positioning_version_id)
-    output, trace = run_execution_plan_agent(
-        context,
-        backboard=BackboardStageService(db),
-        project_id=str(project_id),
-        advice=payload.advice,
-        mode=payload.mode,
-    )
+    try:
+        output, trace = run_execution_plan_agent(
+            context,
+            backboard=BackboardStageService(db),
+            project_id=str(project_id),
+            advice=payload.advice,
+            mode=payload.mode,
+        )
+    except BackboardRequestError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Backboard execution planning failed: {exc}")
 
     plan = LaunchPlan(
         project_id=project_id,
@@ -53,18 +57,29 @@ def generate_execution_plan(
     db.flush()
 
     for task in output.get("tasks", []):
+        title = task.get("title")
+        if not title:
+            continue
         db.add(
             LaunchTask(
                 launch_plan_id=plan.id,
                 day_number=task.get("day_number"),
-                title=task["title"],
+                title=title,
                 description=task.get("description"),
                 priority=task.get("priority", 3),
             )
         )
 
     project.stage = "execution"
-    AuditService(db).log(project_id, "agent", "execution_agent", "execution.plan_generated", "launch_plan", str(plan.id))
+    AuditService(db).log(
+        project_id,
+        "agent",
+        "execution_agent",
+        "execution.plan_generated",
+        "launch_plan",
+        str(plan.id),
+        metadata={"agent_trace": trace, "mode": payload.mode, "advice": payload.advice},
+    )
 
     db.commit()
     return success({"launch_plan_id": str(plan.id), "agent_trace": trace, **output})
@@ -90,15 +105,18 @@ def generate_assets(
     ProjectService(db).get_project_or_404(project_id)
 
     context = build_project_context(db, project_id)
-    drafts, trace = run_asset_generation_agent(
-        context,
-        payload.types,
-        payload.count,
-        backboard=BackboardStageService(db),
-        project_id=str(project_id),
-        advice=payload.advice,
-        mode=payload.mode,
-    )
+    try:
+        drafts, trace = run_asset_generation_agent(
+            context,
+            payload.types,
+            payload.count,
+            backboard=BackboardStageService(db),
+            project_id=str(project_id),
+            advice=payload.advice,
+            mode=payload.mode,
+        )
+    except BackboardRequestError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Backboard asset generation failed: {exc}")
 
     created_assets = []
     fallback_type = payload.types[0] if payload.types else "asset"
@@ -124,7 +142,15 @@ def generate_assets(
             }
         )
 
-    AuditService(db).log(project_id, "agent", "execution_agent", "execution.assets_generated", "asset", None)
+    AuditService(db).log(
+        project_id,
+        "agent",
+        "execution_agent",
+        "execution.assets_generated",
+        "asset",
+        None,
+        metadata={"agent_trace": trace, "mode": payload.mode, "advice": payload.advice, "count": len(created_assets)},
+    )
     db.commit()
     return success({"assets": created_assets, "agent_trace": trace})
 
@@ -167,15 +193,18 @@ def prepare_email_batch(
     ProjectService(db).get_project_or_404(project_id)
 
     context = build_project_context(db, project_id)
-    drafts, trace = run_email_personalization_agent(
-        context,
-        subject_line=payload.subject_line,
-        max_contacts=payload.max_contacts,
-        backboard=BackboardStageService(db),
-        project_id=str(project_id),
-        advice=payload.advice,
-        mode=payload.mode,
-    )
+    try:
+        drafts, trace = run_email_personalization_agent(
+            context,
+            subject_line=payload.subject_line,
+            max_contacts=payload.max_contacts,
+            backboard=BackboardStageService(db),
+            project_id=str(project_id),
+            advice=payload.advice,
+            mode=payload.mode,
+        )
+    except BackboardRequestError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Backboard outreach draft failed: {exc}")
 
     if not drafts:
         return success({"prepared": False, "reason": "No contacts available", "agent_trace": trace})
@@ -212,7 +241,15 @@ def prepare_email_batch(
     )
     db.add(approval)
 
-    AuditService(db).log(project_id, "agent", "execution_agent", "execution.email_batch_prepared", "outbound_batch", str(batch.id))
+    AuditService(db).log(
+        project_id,
+        "agent",
+        "execution_agent",
+        "execution.email_batch_prepared",
+        "outbound_batch",
+        str(batch.id),
+        metadata={"agent_trace": trace, "mode": payload.mode, "advice": payload.advice, "messages_prepared": len(valid_drafts)},
+    )
 
     db.commit()
     return success(

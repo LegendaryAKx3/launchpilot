@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.agents.positioning_agent import run_positioning_agent
 from app.agents.shared_context import build_project_context
 from app.db.session import get_db
+from app.integrations.backboard_client import BackboardRequestError
 from app.models.positioning import PositioningVersion
 from app.routers.utils import success
 from app.schemas.positioning import PositioningRunRequest
@@ -32,13 +33,16 @@ def run_positioning(
     context = build_project_context(db, project_id)
     if payload.wedge_ids:
         context["selected_wedge_ids"] = [str(item) for item in payload.wedge_ids]
-    output, trace = run_positioning_agent(
-        context,
-        backboard=BackboardStageService(db),
-        project_id=str(project_id),
-        advice=payload.advice,
-        mode=payload.mode,
-    )
+    try:
+        output, trace = run_positioning_agent(
+            context,
+            backboard=BackboardStageService(db),
+            project_id=str(project_id),
+            advice=payload.advice,
+            mode=payload.mode,
+        )
+    except BackboardRequestError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Backboard positioning failed: {exc}")
 
     version = PositioningVersion(
         project_id=project_id,
@@ -55,7 +59,15 @@ def run_positioning(
     db.flush()
 
     project.stage = "positioning"
-    AuditService(db).log(project_id, "agent", "positioning_agent", "positioning.generated", "positioning_version", str(version.id))
+    AuditService(db).log(
+        project_id,
+        "agent",
+        "positioning_agent",
+        "positioning.generated",
+        "positioning_version",
+        str(version.id),
+        metadata={"agent_trace": trace, "mode": payload.mode, "advice": payload.advice},
+    )
 
     db.commit()
     return success({"positioning_version_id": str(version.id), "agent_trace": trace, **output})

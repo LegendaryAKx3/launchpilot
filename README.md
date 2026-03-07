@@ -42,8 +42,8 @@ The shipped slice is:
    - `AUTH_MODE=dev` (recommended for hackathon speed)
    - `AUTH_MODE=auth0` (strict JWT validation)
 3. Configure Backboard:
-   - Set `BACKBOARD_API_KEY` to enable the full multi-step agent pipeline.
-   - If omitted, API falls back to deterministic local outputs for offline/dev safety.
+   - Set `BACKBOARD_API_KEY` for the full multi-step agent pipeline.
+   - API startup fails if `BACKBOARD_API_KEY` is missing.
 
 ## Local development
 

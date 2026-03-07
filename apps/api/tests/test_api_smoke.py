@@ -8,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+os.environ["BACKBOARD_API_KEY"] = "test-backboard-key"
 
 from app.db.session import get_db
 from app.main import app

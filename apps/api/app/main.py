@@ -11,6 +11,8 @@ settings = get_settings()
 
 if settings.auth_mode == "auth0" and (not settings.auth0_issuer or not settings.auth0_audience):
     raise RuntimeError("AUTH_MODE=auth0 requires AUTH0_ISSUER and AUTH0_AUDIENCE.")
+if not settings.backboard_api_key:
+    raise RuntimeError("BACKBOARD_API_KEY is required for the finalized agent pipeline.")
 
 app = FastAPI(title=settings.app_name)
 app.add_middleware(
