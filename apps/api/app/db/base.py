@@ -1,4 +1,5 @@
 from app.models.approval import Approval, ActivityEvent
+from app.models.chat import AgentChatMessage
 from app.models.execution import Asset, Contact, LaunchPlan, LaunchTask, OutboundBatch, OutboundMessage
 from app.models.project import Project, ProjectBrief, ProjectMemory, ProjectSource
 from app.models.positioning import PositioningVersion
@@ -26,4 +27,5 @@ __all__ = [
     "OutboundMessage",
     "Approval",
     "ActivityEvent",
+    "AgentChatMessage",
 ]

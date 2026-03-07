@@ -137,13 +137,17 @@ Optional:
 BACKBOARD_BASE_URL=https://app.backboard.io/api
 BACKBOARD_LLM_PROVIDER=openai
 BACKBOARD_MODEL_NAME=gpt-4o
-BACKBOARD_MEMORY_MODE=Auto
+BACKBOARD_MEMORY_MODE=On
 ```
+
+Memory mode options are `On`, `Auto`, `Readonly`, `Off`. For this pipeline, `On` is the default to maximize persistent context retention across stage runs.
 
 Backboard stage sessions are persisted per project and stage using project memory keys:
 - `backboard_research_assistant` / `backboard_research_thread`
 - `backboard_positioning_assistant` / `backboard_positioning_thread`
 - `backboard_execution_assistant` / `backboard_execution_thread`
+
+Each successful stage run also writes a structured stage snapshot into Backboard Memories (`POST /assistants/{assistant_id}/memories`) so future runs can retrieve richer context.
 
 When a system prompt changes, the API automatically rotates the stored stage assistant/thread using a prompt fingerprint so new runs use the updated prompt.
 

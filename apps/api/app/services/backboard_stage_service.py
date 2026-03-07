@@ -14,6 +14,7 @@ from app.integrations.backboard_client import BackboardClient, BackboardRequestE
 from app.services.memory_service import get_project_memory_value, upsert_project_memory
 
 VALID_MODES = {"baseline", "deepen", "retry", "extend"}
+VALID_MEMORY_MODES = {"Off", "On", "Auto", "Readonly"}
 
 MODE_GUIDANCE = {
     "baseline": "Generate a high-confidence baseline output suitable for immediate execution.",
@@ -56,6 +57,8 @@ class BackboardStageService:
         extra_task_instructions: str | None = None,
     ) -> tuple[dict[str, Any], BackboardRunTrace]:
         normalized_mode = mode if mode in VALID_MODES else "baseline"
+        run_memory_mode = self._resolve_memory_mode(self.settings.backboard_memory_mode)
+        repair_memory_mode = "Readonly" if run_memory_mode != "Off" else "Off"
         if not self.enabled:
             raise BackboardRequestError("BACKBOARD_API_KEY is not configured")
 
@@ -80,7 +83,7 @@ class BackboardStageService:
                 result = self.client.add_message(
                     thread_id=thread_id,
                     content=message,
-                    memory=self.settings.backboard_memory_mode,
+                    memory=run_memory_mode,
                     llm_provider=self.settings.backboard_llm_provider,
                     model_name=self.settings.backboard_model_name,
                 )
@@ -119,7 +122,7 @@ class BackboardStageService:
                         "Do not include markdown, prose, or code fences. "
                         "Return exactly one JSON object."
                     ),
-                    memory="Readonly",
+                    memory=repair_memory_mode,
                     llm_provider=self.settings.backboard_llm_provider,
                     model_name=self.settings.backboard_model_name,
                 )
@@ -150,7 +153,7 @@ class BackboardStageService:
                     strict = self.client.add_message(
                         thread_id=thread_id,
                         content=strict_message,
-                        memory="Readonly",
+                        memory=repair_memory_mode,
                         llm_provider=self.settings.backboard_llm_provider,
                         model_name=self.settings.backboard_model_name,
                     )
@@ -176,7 +179,7 @@ class BackboardStageService:
                                 "Keep string values concise to avoid truncation. "
                                 "Return exactly one JSON object matching the required schema."
                             ),
-                            memory="Readonly",
+                            memory=repair_memory_mode,
                             llm_provider=self.settings.backboard_llm_provider,
                             model_name=self.settings.backboard_model_name,
                         )
@@ -199,11 +202,41 @@ class BackboardStageService:
                                 f"{fourth_exc}. first_parse={first_exc}. repair_parse={second_exc}. strict_parse={third_exc}. compact_snippet={snippet}"
                             ) from fourth_exc
 
+        memory_sync: dict[str, Any] = {"status": "skipped", "memory_mode": run_memory_mode}
+        try:
+            memory_result = self._persist_stage_snapshot_memory(
+                assistant_id=assistant_id,
+                project_id=project_id,
+                stage=stage,
+                mode=normalized_mode,
+                advice=advice,
+                context=context,
+                output=parsed,
+            )
+            memory_sync = {
+                "status": "ok",
+                "memory_mode": run_memory_mode,
+                "memory_id": memory_result.get("memory_id"),
+                "memory_operation_id": memory_result.get("memory_operation_id"),
+            }
+        except BackboardRequestError as exc:
+            memory_sync = {
+                "status": "error",
+                "memory_mode": run_memory_mode,
+                "error": str(exc),
+            }
+
         upsert_project_memory(
             self.db,
             project_id,
             f"backboard_{stage}_last_output",
-            {"mode": normalized_mode, "advice": advice, "output": parsed},
+            {
+                "mode": normalized_mode,
+                "memory_mode": run_memory_mode,
+                "advice": advice,
+                "output": parsed,
+                "backboard_memory_sync": memory_sync,
+            },
             "agent_output",
             "backboard",
         )
@@ -214,6 +247,7 @@ class BackboardStageService:
             used_advice=bool(advice and advice.strip()),
             assistant_id=assistant_id,
             thread_id=thread_id,
+            fallback_reason=memory_sync.get("error"),
         )
 
     @property
@@ -346,6 +380,107 @@ class BackboardStageService:
 
     def _prompt_fingerprint(self, text: str) -> str:
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def _resolve_memory_mode(self, mode: str | None) -> str:
+        if not mode:
+            return "On"
+        normalized = mode.strip().capitalize()
+        if normalized in VALID_MEMORY_MODES:
+            return normalized
+        return "On"
+
+    def _persist_stage_snapshot_memory(
+        self,
+        *,
+        assistant_id: str | None,
+        project_id: str,
+        stage: str,
+        mode: str,
+        advice: str | None,
+        context: dict[str, Any],
+        output: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not assistant_id:
+            return {}
+
+        content = self._build_stage_snapshot_memory_content(
+            project_id=project_id,
+            stage=stage,
+            mode=mode,
+            advice=advice,
+            context=context,
+            output=output,
+        )
+        raw = self.client.add_memory(assistant_id, content)
+        return {
+            "memory_id": self._extract_value(raw, ("memory_id", "id")),
+            "memory_operation_id": self._extract_value(raw, ("memory_operation_id", "operation_id")),
+        }
+
+    def _build_stage_snapshot_memory_content(
+        self,
+        *,
+        project_id: str,
+        stage: str,
+        mode: str,
+        advice: str | None,
+        context: dict[str, Any],
+        output: dict[str, Any],
+    ) -> str:
+        capsule = {
+            "type": "stage_snapshot",
+            "project_id": project_id,
+            "stage": stage,
+            "mode": mode,
+            "advice": (advice or "").strip(),
+            "project": {
+                "name": (context.get("project") or {}).get("name"),
+                "goal": (context.get("project") or {}).get("goal"),
+                "stage": (context.get("project") or {}).get("stage"),
+            },
+            "context_summary": self._summarize_context_for_memory(context),
+            "output_summary": self._summarize_output_for_memory(output),
+        }
+        serialized = json.dumps(capsule, ensure_ascii=True)
+        if len(serialized) > 8000:
+            capsule["context_summary"] = capsule["context_summary"][:2000]
+            capsule["output_summary"] = capsule["output_summary"][:3500]
+            serialized = json.dumps(capsule, ensure_ascii=True)
+        return serialized
+
+    def _summarize_context_for_memory(self, context: dict[str, Any]) -> str:
+        project = context.get("project") or {}
+        brief = context.get("brief") or {}
+        research = context.get("research") or {}
+        snippets = [
+            f"project_name={project.get('name') or ''}",
+            f"goal={project.get('goal') or ''}",
+            f"problem={brief.get('problem') or ''}",
+            f"audience={brief.get('audience') or ''}",
+            f"competitor_count={len(research.get('competitors') or [])}",
+            f"pain_cluster_count={len(research.get('pain_points') or [])}",
+            f"wedge_count={len(research.get('wedges') or [])}",
+            f"positioning_version_count={len(context.get('positioning_versions') or [])}",
+            f"contact_count={len(context.get('contacts') or [])}",
+        ]
+        return " | ".join(snippets)[:3500]
+
+    def _summarize_output_for_memory(self, output: dict[str, Any]) -> str:
+        preview: dict[str, Any] = {}
+        for key in list(output.keys())[:10]:
+            value = output.get(key)
+            if isinstance(value, list):
+                preview[key] = value[:5]
+            else:
+                preview[key] = value
+        return json.dumps(preview, ensure_ascii=True)[:5000]
+
+    def _extract_value(self, data: dict[str, Any], keys: tuple[str, ...]) -> str | None:
+        for key in keys:
+            value = data.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return None
 
     def _is_prompt_template_error(self, error_text: str) -> bool:
         lowered = error_text.lower()

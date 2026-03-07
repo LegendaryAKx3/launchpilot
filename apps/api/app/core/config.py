@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     backboard_base_url: str = "https://app.backboard.io/api"
     backboard_llm_provider: str = "openai"
     backboard_model_name: str = "gpt-4o"
-    backboard_memory_mode: str = "Auto"
+    backboard_memory_mode: str = "On"
 
 
 @lru_cache

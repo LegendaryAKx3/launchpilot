@@ -1,3 +1,4 @@
+import { DeleteProjectButton } from "@/components/project/delete-project-button";
 import { serverApiFetch } from "@/lib/api";
 
 interface Project {
@@ -82,6 +83,18 @@ export default async function ProjectSettingsPage({ params }: { params: Promise<
           </div>
         </div>
       </section>
+
+      {project && (
+        <section className="rounded-lg border border-red-500/20 bg-surface-elevated p-4">
+          <h3 className="text-sm font-medium text-red-400">Danger Zone</h3>
+          <p className="mt-2 text-sm text-fg-muted">
+            Permanently delete this project and all associated data.
+          </p>
+          <div className="mt-4">
+            <DeleteProjectButton projectId={project.id} projectName={project.name} />
+          </div>
+        </section>
+      )}
     </div>
   );
 }

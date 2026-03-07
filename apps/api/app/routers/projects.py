@@ -108,6 +108,25 @@ def get_project(
     )
 
 
+@router.delete("/{project_id}")
+def delete_project(
+    project_id: UUID,
+    _scope: CurrentUser = Depends(require_scope("project:write")),
+    db: Session = Depends(get_db),
+):
+    project = ProjectService(db).get_project_or_404(project_id)
+
+    db.query(ProjectMemory).filter(ProjectMemory.project_id == project_id).delete()
+    db.query(ProjectSource).filter(ProjectSource.project_id == project_id).delete()
+    db.query(ProjectBrief).filter(ProjectBrief.project_id == project_id).delete()
+    db.query(ActivityEvent).filter(ActivityEvent.project_id == project_id).delete()
+
+    db.delete(project)
+    db.commit()
+
+    return success({"deleted": True})
+
+
 @router.post("/{project_id}/brief")
 def upsert_project_brief(
     project_id: UUID,

@@ -75,6 +75,32 @@ class BackboardClient:
             )
         return self._parse_response(response, "get thread")
 
+    def add_memory(self, assistant_id: str, content: str) -> dict:
+        payload = {"content": content}
+        with httpx.Client(timeout=self.timeout_seconds) as client:
+            response = client.post(
+                self._url(f"/assistants/{assistant_id}/memories"),
+                headers=self._headers(),
+                json=payload,
+            )
+        return self._parse_response(response, "add memory")
+
+    def list_memories(self, assistant_id: str) -> dict:
+        with httpx.Client(timeout=self.timeout_seconds) as client:
+            response = client.get(
+                self._url(f"/assistants/{assistant_id}/memories"),
+                headers=self._headers(),
+            )
+        return self._parse_response(response, "list memories")
+
+    def get_memory_stats(self, assistant_id: str) -> dict:
+        with httpx.Client(timeout=self.timeout_seconds) as client:
+            response = client.get(
+                self._url(f"/assistants/{assistant_id}/memories/stats"),
+                headers=self._headers(),
+            )
+        return self._parse_response(response, "get memory stats")
+
     def _parse_response(self, response: httpx.Response, action: str) -> dict:
         if response.is_error:
             message = response.text.strip() or response.reason_phrase
