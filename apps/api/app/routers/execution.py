@@ -14,6 +14,7 @@ from app.schemas.execution import AssetGenerationRequest, ContactsUpsertRequest,
 from app.security.auth0 import CurrentUser
 from app.security.permissions import require_scope
 from app.services.audit_service import AuditService
+from app.services.backboard_stage_service import BackboardStageService
 from app.services.execution_service import ExecutionService
 from app.services.project_service import ProjectService
 
@@ -27,11 +28,18 @@ def generate_execution_plan(
     _scope: CurrentUser = Depends(require_scope("execution:run")),
     db: Session = Depends(get_db),
 ):
-    _ = payload
     project = ProjectService(db).get_project_or_404(project_id)
 
     context = build_project_context(db, project_id)
-    output = run_execution_plan_agent(context)
+    if payload.positioning_version_id:
+        context["selected_positioning_version_id"] = str(payload.positioning_version_id)
+    output, trace = run_execution_plan_agent(
+        context,
+        backboard=BackboardStageService(db),
+        project_id=str(project_id),
+        advice=payload.advice,
+        mode=payload.mode,
+    )
 
     plan = LaunchPlan(
         project_id=project_id,
@@ -59,7 +67,17 @@ def generate_execution_plan(
     AuditService(db).log(project_id, "agent", "execution_agent", "execution.plan_generated", "launch_plan", str(plan.id))
 
     db.commit()
-    return success({"launch_plan_id": str(plan.id), **output})
+    return success({"launch_plan_id": str(plan.id), "agent_trace": trace, **output})
+
+
+@router.post("/plan/advise")
+def advise_execution_plan(
+    project_id: UUID,
+    payload: ExecutionPlanRequest,
+    _scope: CurrentUser = Depends(require_scope("execution:run")),
+    db: Session = Depends(get_db),
+):
+    return generate_execution_plan(project_id=project_id, payload=payload, _scope=_scope, db=db)
 
 
 @router.post("/assets")
@@ -72,13 +90,22 @@ def generate_assets(
     ProjectService(db).get_project_or_404(project_id)
 
     context = build_project_context(db, project_id)
-    drafts = run_asset_generation_agent(context, payload.types, payload.count)
+    drafts, trace = run_asset_generation_agent(
+        context,
+        payload.types,
+        payload.count,
+        backboard=BackboardStageService(db),
+        project_id=str(project_id),
+        advice=payload.advice,
+        mode=payload.mode,
+    )
 
     created_assets = []
+    fallback_type = payload.types[0] if payload.types else "asset"
     for draft in drafts:
         asset = Asset(
             project_id=project_id,
-            asset_type=draft["asset_type"],
+            asset_type=draft.get("asset_type") or fallback_type,
             title=draft.get("title"),
             content=draft.get("content", {}),
             storage_path=None,
@@ -99,7 +126,17 @@ def generate_assets(
 
     AuditService(db).log(project_id, "agent", "execution_agent", "execution.assets_generated", "asset", None)
     db.commit()
-    return success({"assets": created_assets})
+    return success({"assets": created_assets, "agent_trace": trace})
+
+
+@router.post("/assets/advise")
+def advise_assets(
+    project_id: UUID,
+    payload: AssetGenerationRequest,
+    _scope: CurrentUser = Depends(require_scope("execution:run")),
+    db: Session = Depends(get_db),
+):
+    return generate_assets(project_id=project_id, payload=payload, _scope=_scope, db=db)
 
 
 @router.post("/contacts")
@@ -130,25 +167,33 @@ def prepare_email_batch(
     ProjectService(db).get_project_or_404(project_id)
 
     context = build_project_context(db, project_id)
-    drafts = run_email_personalization_agent(
+    drafts, trace = run_email_personalization_agent(
         context,
         subject_line=payload.subject_line,
         max_contacts=payload.max_contacts,
+        backboard=BackboardStageService(db),
+        project_id=str(project_id),
+        advice=payload.advice,
+        mode=payload.mode,
     )
 
     if not drafts:
-        return success({"prepared": False, "reason": "No contacts available"})
+        return success({"prepared": False, "reason": "No contacts available", "agent_trace": trace})
+
+    valid_drafts = [item for item in drafts if item.get("contact_id") and item.get("body")]
+    if not valid_drafts:
+        return success({"prepared": False, "reason": "No valid drafts generated", "agent_trace": trace})
 
     batch = OutboundBatch(project_id=project_id, status="pending_approval", subject_line=payload.subject_line)
     db.add(batch)
     db.flush()
 
-    for draft in drafts:
+    for draft in valid_drafts:
         db.add(
             OutboundMessage(
                 batch_id=batch.id,
                 contact_id=draft["contact_id"],
-                subject=draft["subject"],
+                subject=draft.get("subject") or payload.subject_line,
                 body=draft["body"],
                 status="draft",
             )
@@ -170,7 +215,25 @@ def prepare_email_batch(
     AuditService(db).log(project_id, "agent", "execution_agent", "execution.email_batch_prepared", "outbound_batch", str(batch.id))
 
     db.commit()
-    return success({"batch_id": str(batch.id), "approval_id": str(approval.id), "prepared": True})
+    return success(
+        {
+            "batch_id": str(batch.id),
+            "approval_id": str(approval.id),
+            "prepared": True,
+            "messages_prepared": len(valid_drafts),
+            "agent_trace": trace,
+        }
+    )
+
+
+@router.post("/email-batch/prepare/advise")
+def advise_email_batch_prepare(
+    project_id: UUID,
+    payload: EmailBatchPrepareRequest,
+    _scope: CurrentUser = Depends(require_scope("execution:run")),
+    db: Session = Depends(get_db),
+):
+    return prepare_email_batch(project_id=project_id, payload=payload, _scope=_scope, db=db)
 
 
 @router.post("/email-batch/{batch_id}/send")
@@ -212,6 +275,9 @@ def get_execution_state(
     db: Session = Depends(get_db),
 ):
     ProjectService(db).get_project_or_404(project_id)
+    plans = db.query(LaunchPlan).filter(LaunchPlan.project_id == project_id).order_by(LaunchPlan.created_at.desc()).all()
+    plan_ids = [plan.id for plan in plans]
+    tasks = db.query(LaunchTask).filter(LaunchTask.launch_plan_id.in_(plan_ids)).order_by(LaunchTask.day_number.asc()).all() if plan_ids else []
     assets = db.query(Asset).filter(Asset.project_id == project_id).order_by(Asset.created_at.desc()).all()
     contacts = db.query(Contact).filter(Contact.project_id == project_id).all()
     batches = db.query(OutboundBatch).filter(OutboundBatch.project_id == project_id).order_by(OutboundBatch.created_at.desc()).all()
@@ -224,6 +290,29 @@ def get_execution_state(
 
     return success(
         {
+            "plans": [
+                {
+                    "id": str(plan.id),
+                    "positioning_version_id": str(plan.positioning_version_id) if plan.positioning_version_id else None,
+                    "primary_channel": plan.primary_channel,
+                    "secondary_channels": plan.secondary_channels,
+                    "kpis": plan.kpis,
+                    "status": plan.status,
+                }
+                for plan in plans
+            ],
+            "tasks": [
+                {
+                    "id": str(task.id),
+                    "launch_plan_id": str(task.launch_plan_id),
+                    "day_number": task.day_number,
+                    "title": task.title,
+                    "description": task.description,
+                    "status": task.status,
+                    "priority": task.priority,
+                }
+                for task in tasks
+            ],
             "assets": [
                 {
                     "id": str(a.id),

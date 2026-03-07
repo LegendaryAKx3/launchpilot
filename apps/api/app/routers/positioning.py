@@ -13,6 +13,7 @@ from app.schemas.positioning import PositioningRunRequest
 from app.security.auth0 import CurrentUser
 from app.security.permissions import require_scope
 from app.services.audit_service import AuditService
+from app.services.backboard_stage_service import BackboardStageService
 from app.services.memory_service import upsert_project_memory
 from app.services.project_service import ProjectService
 
@@ -26,11 +27,18 @@ def run_positioning(
     _scope: CurrentUser = Depends(require_scope("positioning:run")),
     db: Session = Depends(get_db),
 ):
-    _ = payload
     project = ProjectService(db).get_project_or_404(project_id)
 
     context = build_project_context(db, project_id)
-    output = run_positioning_agent(context)
+    if payload.wedge_ids:
+        context["selected_wedge_ids"] = [str(item) for item in payload.wedge_ids]
+    output, trace = run_positioning_agent(
+        context,
+        backboard=BackboardStageService(db),
+        project_id=str(project_id),
+        advice=payload.advice,
+        mode=payload.mode,
+    )
 
     version = PositioningVersion(
         project_id=project_id,
@@ -50,7 +58,17 @@ def run_positioning(
     AuditService(db).log(project_id, "agent", "positioning_agent", "positioning.generated", "positioning_version", str(version.id))
 
     db.commit()
-    return success({"positioning_version_id": str(version.id), **output})
+    return success({"positioning_version_id": str(version.id), "agent_trace": trace, **output})
+
+
+@router.post("/advise")
+def advise_positioning(
+    project_id: UUID,
+    payload: PositioningRunRequest,
+    _scope: CurrentUser = Depends(require_scope("positioning:run")),
+    db: Session = Depends(get_db),
+):
+    return run_positioning(project_id=project_id, payload=payload, _scope=_scope, db=db)
 
 
 @router.get("")

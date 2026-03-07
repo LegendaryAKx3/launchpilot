@@ -14,6 +14,7 @@ from app.schemas.research import ResearchRunRequest
 from app.security.auth0 import CurrentUser
 from app.security.permissions import require_scope
 from app.services.audit_service import AuditService
+from app.services.backboard_stage_service import BackboardStageService
 from app.services.memory_service import upsert_project_memory
 from app.services.project_service import ProjectService
 
@@ -27,11 +28,18 @@ def run_research(
     _scope: CurrentUser = Depends(require_scope("research:run")),
     db: Session = Depends(get_db),
 ):
-    _ = payload
     project = ProjectService(db).get_project_or_404(project_id)
 
     context = build_project_context(db, project_id)
-    output = run_research_agent(context)
+    if payload.pinned_wedge_ids:
+        context["pinned_wedge_ids"] = [str(item) for item in payload.pinned_wedge_ids]
+    output, trace = run_research_agent(
+        context,
+        backboard=BackboardStageService(db),
+        project_id=str(project_id),
+        advice=payload.advice,
+        mode=payload.mode,
+    )
 
     run = ResearchRun(
         project_id=project_id,
@@ -95,6 +103,7 @@ def run_research(
 
     return success(
         {
+            "agent_trace": trace,
             "run": {
                 "id": str(run.id),
                 "status": run.status,
@@ -106,6 +115,16 @@ def run_research(
             "opportunity_wedges": output.get("opportunity_wedges", []),
         }
     )
+
+
+@router.post("/advise")
+def advise_research(
+    project_id: UUID,
+    payload: ResearchRunRequest,
+    _scope: CurrentUser = Depends(require_scope("research:run")),
+    db: Session = Depends(get_db),
+):
+    return run_research(project_id=project_id, payload=payload, _scope=_scope, db=db)
 
 
 @router.get("")

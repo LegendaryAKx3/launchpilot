@@ -7,6 +7,7 @@ This repo is intentionally streamlined for a 36-hour delivery window:
 - FastAPI backend (`apps/api`)
 - Postgres for app state
 - Synchronous execution flow (no worker queue)
+- Backboard-backed agent reasoning + memory threads
 
 ## Core Product Slice
 
@@ -40,6 +41,9 @@ The shipped slice is:
 2. Choose auth mode:
    - `AUTH_MODE=dev` (recommended for hackathon speed)
    - `AUTH_MODE=auth0` (strict JWT validation)
+3. Configure Backboard:
+   - Set `BACKBOARD_API_KEY` to enable the full multi-step agent pipeline.
+   - If omitted, API falls back to deterministic local outputs for offline/dev safety.
 
 ## Local development
 
@@ -119,6 +123,28 @@ AUTH0_AUDIENCE=YOUR_API_IDENTIFIER
 
 Backend fails fast on startup if these are missing.
 
+## Backboard setup
+
+Set:
+
+```env
+BACKBOARD_API_KEY=your_backboard_api_key
+```
+
+Optional:
+
+```env
+BACKBOARD_BASE_URL=https://app.backboard.io/api
+BACKBOARD_LLM_PROVIDER=openai
+BACKBOARD_MODEL_NAME=gpt-4o
+BACKBOARD_MEMORY_MODE=Auto
+```
+
+Backboard stage sessions are persisted per project and stage using project memory keys:
+- `backboard_research_assistant` / `backboard_research_thread`
+- `backboard_positioning_assistant` / `backboard_positioning_thread`
+- `backboard_execution_assistant` / `backboard_execution_thread`
+
 ## API overview
 
 Base URL: `http://localhost:8000/v1`
@@ -140,20 +166,25 @@ Base URL: `http://localhost:8000/v1`
 ### Research
 
 - `POST /projects/{project_id}/research/run` (synchronous)
+- `POST /projects/{project_id}/research/advise` (interactive follow-up on same stage thread)
 - `GET /projects/{project_id}/research`
 
 ### Positioning
 
 - `POST /projects/{project_id}/positioning/run` (synchronous)
+- `POST /projects/{project_id}/positioning/advise` (interactive follow-up on same stage thread)
 - `GET /projects/{project_id}/positioning`
 - `POST /projects/{project_id}/positioning/select/{version_id}`
 
 ### Execution
 
 - `POST /projects/{project_id}/execution/plan` (synchronous)
+- `POST /projects/{project_id}/execution/plan/advise` (interactive follow-up)
 - `POST /projects/{project_id}/execution/assets` (synchronous)
+- `POST /projects/{project_id}/execution/assets/advise` (interactive follow-up)
 - `POST /projects/{project_id}/execution/contacts`
 - `POST /projects/{project_id}/execution/email-batch/prepare` (synchronous)
+- `POST /projects/{project_id}/execution/email-batch/prepare/advise` (interactive follow-up)
 - `POST /projects/{project_id}/execution/email-batch/{batch_id}/send` (requires approval)
 - `GET /projects/{project_id}/execution/state`
 

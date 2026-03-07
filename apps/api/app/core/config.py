@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     resend_api_key: str | None = None
     resend_from_email: str = "noreply@growthlaunchpad.app"
 
+    # Backboard agent orchestration
+    backboard_api_key: str | None = None
+    backboard_base_url: str = "https://app.backboard.io/api"
+    backboard_llm_provider: str = "openai"
+    backboard_model_name: str = "gpt-4o"
+    backboard_memory_mode: str = "Auto"
+
 
 @lru_cache
 def get_settings() -> Settings:

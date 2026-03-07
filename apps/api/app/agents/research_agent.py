@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from app.integrations.backboard_client import BackboardRequestError
 from app.prompts.research_prompt import RESEARCH_PROMPT
+from app.services.backboard_stage_service import BackboardStageService
 
 
-def run_research_agent(context: dict) -> dict:
+def _fallback_research_output(context: dict) -> dict:
     project_name = context.get("project", {}).get("name") or "Project"
     summary = (context.get("project", {}).get("summary") or "").lower()
 
@@ -62,4 +64,57 @@ def run_research_agent(context: dict) -> dict:
         "opportunity_wedges": wedges,
         "risk_warnings": ["Crowded launch tooling category"],
         "summary": f"{project_name} sits in {category} with strongest wedge around hackathon-to-first-user execution.",
+    }
+
+
+def run_research_agent(
+    context: dict,
+    *,
+    backboard: BackboardStageService | None = None,
+    project_id: str | None = None,
+    advice: str | None = None,
+    mode: str = "baseline",
+) -> tuple[dict, dict]:
+    if backboard and project_id:
+        try:
+            response, trace = backboard.run_json_stage(
+                project_id=project_id,
+                project_name=context.get("project", {}).get("name") or "project",
+                stage="research",
+                system_prompt=RESEARCH_PROMPT,
+                context=context,
+                advice=advice,
+                mode=mode,
+            )
+            normalized = {
+                "project_category": response.get("project_category") or "unknown",
+                "candidate_user_segments": response.get("candidate_user_segments") or [],
+                "competitors": response.get("competitors") or [],
+                "pain_point_clusters": response.get("pain_point_clusters") or [],
+                "opportunity_wedges": response.get("opportunity_wedges") or [],
+                "risk_warnings": response.get("risk_warnings") or [],
+                "summary": response.get("summary") or "",
+            }
+            return normalized, {
+                "provider": trace.provider,
+                "mode": trace.mode,
+                "used_advice": trace.used_advice,
+                "assistant_id": trace.assistant_id,
+                "thread_id": trace.thread_id,
+            }
+        except BackboardRequestError as exc:
+            fallback = _fallback_research_output(context)
+            return fallback, {
+                "provider": "fallback",
+                "mode": mode,
+                "used_advice": bool(advice and advice.strip()),
+                "fallback_reason": str(exc),
+            }
+
+    fallback = _fallback_research_output(context)
+    return fallback, {
+        "provider": "fallback",
+        "mode": mode,
+        "used_advice": bool(advice and advice.strip()),
+        "fallback_reason": "Backboard not configured",
     }

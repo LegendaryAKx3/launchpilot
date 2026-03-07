@@ -36,6 +36,18 @@ services:
       - ../../:/workspace
     environment:
       SUPABASE_DB_URL: postgresql+psycopg://postgres:postgres@db:5432/postgres
+      WEB_APP_URL: ${WEB_APP_URL:-http://localhost:3000}
+      AUTH_MODE: ${AUTH_MODE:-dev}
+      AUTH0_ISSUER: ${AUTH0_ISSUER:-}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-}
+      APP_JWT_NAMESPACE: ${APP_JWT_NAMESPACE:-https://growthlaunchpad.app}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-noreply@growthlaunchpad.app}
+      BACKBOARD_API_KEY: ${BACKBOARD_API_KEY:-}
+      BACKBOARD_BASE_URL: ${BACKBOARD_BASE_URL:-https://app.backboard.io/api}
+      BACKBOARD_LLM_PROVIDER: ${BACKBOARD_LLM_PROVIDER:-openai}
+      BACKBOARD_MODEL_NAME: ${BACKBOARD_MODEL_NAME:-gpt-4o}
+      BACKBOARD_MEMORY_MODE: ${BACKBOARD_MEMORY_MODE:-Auto}
     ports:
       - "8000:8000"
     depends_on:

@@ -33,3 +33,19 @@ def upsert_project_memory(
     )
     db.add(row)
     return row
+
+
+def get_project_memory_value(
+    db: Session,
+    project_id,
+    key: str,
+    default: dict | None = None,
+) -> dict:
+    row = (
+        db.query(ProjectMemory)
+        .filter(ProjectMemory.project_id == project_id, ProjectMemory.memory_key == key)
+        .first()
+    )
+    if not row:
+        return default or {}
+    return row.memory_value or (default or {})
