@@ -14,7 +14,7 @@ interface AgentChatProps {
   onSend: (message: string, mode: string) => Promise<string | null>;
   isProcessing: boolean;
   messages: Message[];
-  onMessagesChange: (messages: Message[]) => void;
+  onMessagesChange: (messages: Message[]) => Promise<Message[] | void> | Message[] | void;
   modes?: { value: string; label: string }[];
   quickActions?: { label: string; message: string }[];
 }
@@ -54,7 +54,8 @@ export function AgentChat({
         timestamp: new Date()
       };
       const updatedWithUser = [...messages, userMessage];
-      onMessagesChange(updatedWithUser);
+      const persistedUserState = await onMessagesChange(updatedWithUser);
+      const canonicalMessages = Array.isArray(persistedUserState) ? persistedUserState : updatedWithUser;
 
       const response = await onSend(content, mode);
 
@@ -65,7 +66,7 @@ export function AgentChat({
           content: response,
           timestamp: new Date()
         };
-        onMessagesChange([...updatedWithUser, agentMessage]);
+        await onMessagesChange([...canonicalMessages, agentMessage]);
       }
     },
     [mode, onSend, messages, onMessagesChange]

@@ -64,7 +64,7 @@ export default function PositioningPage() {
 
   const saveChatMessages = useCallback(
     async (newMessages: Message[]) => {
-      if (!projectId) return;
+      if (!projectId) return newMessages;
       const toSave = newMessages.filter((m) => isLocalMessageId(m.id));
 
       if (toSave.length > 0) {
@@ -80,10 +80,12 @@ export default function PositioningPage() {
           })
           }
         );
-        setMessages(mergeSavedMessages(newMessages, saved?.messages ?? []));
-        return;
+        const merged = mergeSavedMessages(newMessages, saved?.messages ?? []);
+        setMessages(merged);
+        return merged;
       }
       setMessages(newMessages);
+      return newMessages;
     },
     [projectId]
   );
