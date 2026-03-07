@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import ast
 from dataclasses import dataclass
 from typing import Any
 
@@ -70,15 +71,55 @@ class BackboardStageService:
             advice=advice,
             extra_task_instructions=extra_task_instructions,
         )
-        result = self.client.add_message(
-            thread_id=thread_id,
-            content=message,
-            memory=self.settings.backboard_memory_mode,
-            llm_provider=self.settings.backboard_llm_provider,
-            model_name=self.settings.backboard_model_name,
-        )
+        try:
+            result = self.client.add_message(
+                thread_id=thread_id,
+                content=message,
+                memory=self.settings.backboard_memory_mode,
+                llm_provider=self.settings.backboard_llm_provider,
+                model_name=self.settings.backboard_model_name,
+            )
+        except BackboardRequestError as exc:
+            if self._is_prompt_template_error(str(exc)):
+                assistant_id, thread_id = self._reset_stage_session(
+                    project_id=project_id,
+                    project_name=project_name,
+                    stage=stage,
+                    system_prompt=system_prompt,
+                )
+                result = self.client.add_message(
+                    thread_id=thread_id,
+                    content=message,
+                    memory=self.settings.backboard_memory_mode,
+                    llm_provider=self.settings.backboard_llm_provider,
+                    model_name=self.settings.backboard_model_name,
+                )
+            else:
+                raise
         text = self._extract_text_content(result)
-        parsed = self._parse_json_response(text)
+        try:
+            parsed = self._parse_json_response(text)
+        except BackboardRequestError as first_exc:
+            # Ask the same thread to reformat its last response as strict JSON.
+            repair = self.client.add_message(
+                thread_id=thread_id,
+                content=(
+                    "Reformat your previous answer as valid JSON only. "
+                    "Do not include markdown, prose, or code fences. "
+                    "Return exactly one JSON object."
+                ),
+                memory="Readonly",
+                llm_provider=self.settings.backboard_llm_provider,
+                model_name=self.settings.backboard_model_name,
+            )
+            repaired_text = self._extract_text_content(repair)
+            try:
+                parsed = self._parse_json_response(repaired_text)
+            except BackboardRequestError as second_exc:
+                snippet = repaired_text[:800].replace("\n", " ")
+                raise BackboardRequestError(
+                    f"{second_exc}. first_parse={first_exc}. repaired_snippet={snippet}"
+                ) from second_exc
 
         upsert_project_memory(
             self.db,
@@ -126,7 +167,10 @@ class BackboardStageService:
 
         if not assistant_id:
             assistant_name = f"{project_name or 'project'}-{stage}-agent"
-            assistant_id = self.client.create_assistant(name=assistant_name, system_prompt=system_prompt)
+            assistant_id = self.client.create_assistant(
+                name=assistant_name,
+                system_prompt=self._escape_prompt_template_braces(system_prompt),
+            )
             upsert_project_memory(
                 self.db,
                 project_id,
@@ -147,6 +191,42 @@ class BackboardStageService:
                 "backboard",
             )
 
+        return assistant_id, thread_id
+
+    def _reset_stage_session(
+        self,
+        *,
+        project_id: str,
+        project_name: str,
+        stage: str,
+        system_prompt: str,
+    ) -> tuple[str, str]:
+        assistant_key = f"backboard_{stage}_assistant"
+        thread_key = f"backboard_{stage}_thread"
+
+        assistant_name = f"{project_name or 'project'}-{stage}-agent"
+        assistant_id = self.client.create_assistant(
+            name=assistant_name,
+            system_prompt=self._escape_prompt_template_braces(system_prompt),
+        )
+        thread_id = self.client.create_thread(assistant_id)
+
+        upsert_project_memory(
+            self.db,
+            project_id,
+            assistant_key,
+            {"assistant_id": assistant_id},
+            "integration_ref",
+            "backboard",
+        )
+        upsert_project_memory(
+            self.db,
+            project_id,
+            thread_key,
+            {"thread_id": thread_id},
+            "integration_ref",
+            "backboard",
+        )
         return assistant_id, thread_id
 
     def _build_stage_message(
@@ -175,8 +255,20 @@ class BackboardStageService:
         )
         return "\n\n".join(parts)
 
+    def _escape_prompt_template_braces(self, text: str) -> str:
+        return text.replace("{", "{{").replace("}", "}}")
+
+    def _is_prompt_template_error(self, error_text: str) -> bool:
+        lowered = error_text.lower()
+        return "invalid_prompt_input" in lowered or "missing variables" in lowered
+
     def _extract_text_content(self, result: dict[str, Any]) -> str:
-        content = result.get("content")
+        content = (
+            result.get("content")
+            or (result.get("message") or {}).get("content")
+            or (result.get("data") or {}).get("content")
+            or (result.get("response") or {}).get("content")
+        )
         if isinstance(content, str):
             return content.strip()
         if isinstance(content, list):
@@ -197,23 +289,64 @@ class BackboardStageService:
             cleaned = re.sub(r"^```(?:json)?", "", cleaned).strip()
             cleaned = re.sub(r"```$", "", cleaned).strip()
 
-        try:
-            parsed = json.loads(cleaned)
-        except json.JSONDecodeError:
-            parsed = None
-
+        parsed = self._parse_json_or_python_dict(cleaned)
         if isinstance(parsed, dict):
             return parsed
 
-        match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
-        if not match:
+        extracted = self._extract_first_json_object(cleaned)
+        if extracted is None:
             raise BackboardRequestError("Backboard response did not contain JSON object content")
 
-        try:
-            parsed = json.loads(match.group(0))
-        except json.JSONDecodeError as exc:
-            raise BackboardRequestError("Backboard response contained invalid JSON") from exc
-
+        parsed = self._parse_json_or_python_dict(extracted)
         if not isinstance(parsed, dict):
-            raise BackboardRequestError("Backboard JSON response was not an object")
+            raise BackboardRequestError("Backboard response contained invalid JSON")
+
         return parsed
+
+    def _parse_json_or_python_dict(self, text: str) -> dict[str, Any] | None:
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+        try:
+            parsed = ast.literal_eval(text)
+            if isinstance(parsed, dict):
+                return parsed
+        except (ValueError, SyntaxError):
+            pass
+
+        return None
+
+    def _extract_first_json_object(self, text: str) -> str | None:
+        start = text.find("{")
+        if start == -1:
+            return None
+
+        depth = 0
+        in_string = False
+        escape = False
+        for idx in range(start, len(text)):
+            ch = text[idx]
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+                continue
+
+            if ch == '"':
+                in_string = True
+                continue
+
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : idx + 1]
+        return None
