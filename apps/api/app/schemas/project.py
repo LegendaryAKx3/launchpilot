@@ -6,7 +6,6 @@ from app.schemas.common import APIModel
 
 
 class ProjectCreateRequest(BaseModel):
-    workspace_id: uuid.UUID
     name: str
     summary: str | None = None
     goal: str | None = None

@@ -4,18 +4,51 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models.project import Project, ProjectBrief, ProjectSource
 from app.models.approval import ActivityEvent
-from app.models.project import ProjectMemory
-from app.models.workspace import User
+from app.models.project import Project, ProjectBrief, ProjectMemory, ProjectSource
+from app.models.workspace import WorkspaceMember
 from app.routers.utils import success
 from app.schemas.project import ProjectBriefUpsertRequest, ProjectCreateRequest, ProjectSourceCreateRequest
 from app.security.auth0 import CurrentUser, get_current_user
 from app.security.permissions import require_scope
-from app.services.job_service import JobService
+from app.services.audit_service import AuditService
 from app.services.project_service import ProjectService
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+@router.get("")
+def list_projects(
+    current_user: CurrentUser = Depends(get_current_user),
+    _scope: CurrentUser = Depends(require_scope("project:read")),
+    db: Session = Depends(get_db),
+):
+    project_service = ProjectService(db)
+    user = project_service.get_or_create_local_user(current_user)
+
+    rows = (
+        db.query(Project)
+        .join(WorkspaceMember, WorkspaceMember.workspace_id == Project.workspace_id)
+        .filter(WorkspaceMember.user_id == user.id)
+        .order_by(Project.created_at.desc())
+        .all()
+    )
+
+    return success(
+        [
+            {
+                "id": str(project.id),
+                "workspace_id": str(project.workspace_id),
+                "name": project.name,
+                "slug": project.slug,
+                "summary": project.summary,
+                "stage": project.stage,
+                "goal": project.goal,
+                "status": project.status,
+            }
+            for project in rows
+        ]
+    )
 
 
 @router.post("")
@@ -26,13 +59,13 @@ def create_project(
     db: Session = Depends(get_db),
 ):
     project_service = ProjectService(db)
-    project_service.ensure_workspace_access(payload.workspace_id, current_user)
+    actor = project_service.get_or_create_local_user(current_user)
+    workspace = project_service.get_or_create_default_workspace(actor)
 
-    actor = db.query(User).filter(User.auth0_user_id == current_user.sub).first()
-    slug = project_service.next_available_project_slug(payload.workspace_id, payload.name)
+    slug = project_service.next_available_project_slug(workspace.id, payload.name)
 
     project = Project(
-        workspace_id=payload.workspace_id,
+        workspace_id=workspace.id,
         name=payload.name,
         slug=slug,
         summary=payload.summary,
@@ -40,14 +73,16 @@ def create_project(
         website_url=payload.website_url,
         repo_url=payload.repo_url,
         target_market_hint=payload.target_market_hint,
-        created_by=actor.id if actor else None,
+        created_by=actor.id,
+        stage="idea",
     )
     db.add(project)
     db.flush()
 
-    job = JobService(db).enqueue(project.id, "project.bootstrap", created_by=actor.id if actor else None)
+    AuditService(db).log(project.id, "system", None, "project.created", "project", str(project.id))
+
     db.commit()
-    return success({"project_id": str(project.id), "job_id": str(job.id)})
+    return success({"project_id": str(project.id), "slug": project.slug})
 
 
 @router.get("/{project_id}")

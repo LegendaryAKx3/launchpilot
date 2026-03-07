@@ -10,7 +10,6 @@ from app.routers.utils import success
 from app.schemas.approval import ApprovalDecisionRequest
 from app.security.auth0 import CurrentUser, get_current_user
 from app.security.permissions import require_scope
-from app.services.job_service import JobService
 
 router = APIRouter(tags=["approvals"])
 
@@ -68,9 +67,6 @@ def approve(
     approval.rejected_at = None
     if payload.reason:
         approval.reason = payload.reason
-
-    if approval.action_type == "send_email_batch" and approval.resource_id:
-        JobService(db).enqueue(approval.project_id, "execution.send_email_batch", payload={"batch_id": str(approval.resource_id)})
 
     db.commit()
     return success({"approval_id": str(approval.id), "status": approval.status})

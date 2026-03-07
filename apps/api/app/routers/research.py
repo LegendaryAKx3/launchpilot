@@ -1,34 +1,111 @@
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
+from app.agents.research_agent import run_research_agent
+from app.agents.shared_context import build_project_context
 from app.db.session import get_db
-from app.models.project import JobRun
 from app.models.research import Competitor, OpportunityWedge, PainPointCluster, ResearchRun
 from app.routers.utils import success
 from app.schemas.research import ResearchRunRequest
 from app.security.auth0 import CurrentUser
 from app.security.permissions import require_scope
-from app.services.job_service import JobService
+from app.services.audit_service import AuditService
+from app.services.memory_service import upsert_project_memory
 from app.services.project_service import ProjectService
 
 router = APIRouter(prefix="/projects/{project_id}/research", tags=["research"])
 
 
 @router.post("/run")
-def queue_research_run(
+def run_research(
     project_id: UUID,
     payload: ResearchRunRequest,
     _scope: CurrentUser = Depends(require_scope("research:run")),
     db: Session = Depends(get_db),
 ):
-    ProjectService(db).get_project_or_404(project_id)
-    run = ResearchRun(project_id=project_id, status="queued")
+    _ = payload
+    project = ProjectService(db).get_project_or_404(project_id)
+
+    context = build_project_context(db, project_id)
+    output = run_research_agent(context)
+
+    run = ResearchRun(
+        project_id=project_id,
+        status="succeeded",
+        summary=output.get("summary"),
+        completed_at=datetime.now(timezone.utc),
+    )
     db.add(run)
-    job = JobService(db).enqueue(project_id, "research.run", payload=payload.model_dump())
+
+    db.execute(delete(Competitor).where(Competitor.project_id == project_id))
+    db.execute(delete(PainPointCluster).where(PainPointCluster.project_id == project_id))
+    db.execute(delete(OpportunityWedge).where(OpportunityWedge.project_id == project_id))
+
+    for item in output.get("competitors", []):
+        db.add(
+            Competitor(
+                project_id=project_id,
+                name=item["name"],
+                positioning=item.get("positioning"),
+                pricing_summary=item.get("pricing_summary"),
+                strengths=item.get("strengths", []),
+                weaknesses=item.get("weaknesses", []),
+            )
+        )
+
+    for idx, item in enumerate(output.get("pain_point_clusters", []), start=1):
+        db.add(
+            PainPointCluster(
+                project_id=project_id,
+                label=item["label"],
+                description=item.get("description"),
+                evidence=item.get("evidence", []),
+                rank=idx,
+            )
+        )
+
+    for item in output.get("opportunity_wedges", []):
+        db.add(
+            OpportunityWedge(
+                project_id=project_id,
+                label=item["label"],
+                description=item.get("description"),
+                score=item.get("score"),
+                status="candidate",
+            )
+        )
+
+    upsert_project_memory(
+        db,
+        project_id,
+        "recommended_wedge_candidates",
+        {"wedges": [w["label"] for w in output.get("opportunity_wedges", [])]},
+        "fact",
+        "agent",
+    )
+
+    project.stage = "research"
+    AuditService(db).log(project_id, "agent", "research_agent", "research.generated", "research_run", str(run.id))
+
     db.commit()
-    return success({"research_run_id": str(run.id), "job_id": str(job.id)})
+
+    return success(
+        {
+            "run": {
+                "id": str(run.id),
+                "status": run.status,
+                "summary": run.summary,
+                "saturation_score": float(run.saturation_score or 0) if run.saturation_score is not None else None,
+            },
+            "competitors": output.get("competitors", []),
+            "pain_point_clusters": output.get("pain_point_clusters", []),
+            "opportunity_wedges": output.get("opportunity_wedges", []),
+        }
+    )
 
 
 @router.get("")
@@ -47,13 +124,7 @@ def get_research_snapshot(
     competitors = db.query(Competitor).filter(Competitor.project_id == project_id).all()
     pains = db.query(PainPointCluster).filter(PainPointCluster.project_id == project_id).all()
     wedges = db.query(OpportunityWedge).filter(OpportunityWedge.project_id == project_id).all()
-    jobs = (
-        db.query(JobRun)
-        .filter(JobRun.project_id == project_id, JobRun.job_type == "research.run")
-        .order_by(JobRun.created_at.desc())
-        .limit(5)
-        .all()
-    )
+
     return success(
         {
             "run": {
@@ -95,6 +166,5 @@ def get_research_snapshot(
                 }
                 for w in wedges
             ],
-            "recent_jobs": [{"id": str(j.id), "status": j.status, "error": j.error_message} for j in jobs],
         }
     )

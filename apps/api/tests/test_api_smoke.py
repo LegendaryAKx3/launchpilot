@@ -1,17 +1,27 @@
 import uuid
+import os
+import sys
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from app.db.session import get_db
 from app.main import app
 from app.models.base import Base
-from app.models.workspace import Workspace
+from app.models.project import Project
 
 
 def build_test_client():
-    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     TestingSessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     Base.metadata.create_all(bind=engine)
 
@@ -33,25 +43,24 @@ def test_health_endpoint():
     assert response.json()["data"]["status"] == "ok"
 
 
-def test_project_creation_queues_bootstrap_job():
+def test_project_creation_returns_slug_and_creates_project():
     client, SessionLocal = build_test_client()
-
-    with SessionLocal() as db:
-        workspace = Workspace(name="Demo Workspace", slug="demo-workspace", auth0_org_id="org_dev")
-        db.add(workspace)
-        db.commit()
-        workspace_id = workspace.id
 
     response = client.post(
         "/v1/projects",
         json={
-            "workspace_id": str(workspace_id),
             "name": "My Tool",
             "summary": "AI launch helper",
             "goal": "Get first users",
         },
     )
     assert response.status_code == 200
+
     payload = response.json()["data"]
     assert uuid.UUID(payload["project_id"])
-    assert uuid.UUID(payload["job_id"])
+    assert payload["slug"] == "my-tool"
+
+    with SessionLocal() as db:
+        row = db.query(Project).filter(Project.id == uuid.UUID(payload["project_id"])).first()
+        assert row is not None
+        assert row.name == "My Tool"

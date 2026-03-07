@@ -61,7 +61,7 @@ def _dev_user() -> CurrentUser:
         sub="auth0|dev-user",
         email="dev@growthlaunchpad.app",
         name="Dev User",
-        org_id="org_dev",
+        org_id=None,
         workspace_role="owner",
         scopes={
             "project:read",
@@ -72,9 +72,6 @@ def _dev_user() -> CurrentUser:
             "approval:read",
             "approval:write",
             "execution:send",
-            "creative:publish",
-            "connector:link",
-            "admin:workspace",
         },
         allowed_actions=["approve_send", "publish_asset"],
         raw_claims={},
@@ -85,9 +82,11 @@ def get_current_user(
     authorization: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
 ) -> CurrentUser:
-    # Local fallback for rapid development when Auth0 is not configured.
-    if not settings.auth0_issuer or not settings.auth0_audience:
+    if settings.auth_mode.lower() == "dev":
         return _dev_user()
+
+    if settings.auth_mode.lower() != "auth0":
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unsupported AUTH_MODE")
 
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
@@ -103,7 +102,7 @@ def get_current_user(
         email=claims.get("email"),
         name=claims.get("name"),
         org_id=claims.get(f"{ns}org_id") or claims.get("org_id"),
-        workspace_role=claims.get(f"{ns}workspace_role"),
+        workspace_role=claims.get(f"{ns}workspace_role") or "owner",
         scopes=scopes,
         allowed_actions=claims.get(f"{ns}allowed_actions", []),
         raw_claims=claims,

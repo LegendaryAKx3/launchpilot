@@ -4,10 +4,13 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging
-from app.routers import approvals, assets, execution, health, me, positioning, projects, research, workspaces
+from app.routers import approvals, execution, health, me, positioning, projects, research
 
 configure_logging()
 settings = get_settings()
+
+if settings.auth_mode == "auth0" and (not settings.auth0_issuer or not settings.auth0_audience):
+    raise RuntimeError("AUTH_MODE=auth0 requires AUTH0_ISSUER and AUTH0_AUDIENCE.")
 
 app = FastAPI(title=settings.app_name)
 app.add_middleware(
@@ -36,10 +39,8 @@ def root():
 
 app.include_router(health.router, prefix="/v1")
 app.include_router(me.router, prefix="/v1")
-app.include_router(workspaces.router, prefix="/v1")
 app.include_router(projects.router, prefix="/v1")
 app.include_router(research.router, prefix="/v1")
 app.include_router(positioning.router, prefix="/v1")
 app.include_router(execution.router, prefix="/v1")
 app.include_router(approvals.router, prefix="/v1")
-app.include_router(assets.router, prefix="/v1")

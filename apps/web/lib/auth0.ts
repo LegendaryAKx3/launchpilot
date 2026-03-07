@@ -1,16 +1,43 @@
 import { Auth0Client } from "@auth0/nextjs-auth0/server";
 
+function normalizeDomain(value?: string) {
+  if (!value) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return trimmed.replace(/^https?:\/\//, "").replace(/\/$/, "");
+}
+
+function normalizeAppBaseUrl(value?: string) {
+  if (!value) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  if (/^https?:\/\//.test(trimmed)) {
+    return trimmed.replace(/\/$/, "");
+  }
+
+  return `http://${trimmed.replace(/\/$/, "")}`;
+}
+
 function readAuth0Config() {
-  const domain =
-    process.env.AUTH0_DOMAIN ??
-    process.env.AUTH0_ISSUER_BASE_URL?.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const domain = normalizeDomain(process.env.AUTH0_DOMAIN ?? process.env.AUTH0_ISSUER_BASE_URL);
   const clientId = process.env.AUTH0_CLIENT_ID;
   const clientSecret = process.env.AUTH0_CLIENT_SECRET;
   const secret = process.env.AUTH0_SECRET;
-  const appBaseUrl =
-    process.env.APP_BASE_URL ??
-    process.env.AUTH0_BASE_URL ??
-    process.env.NEXT_PUBLIC_APP_URL;
+  const appBaseUrl = normalizeAppBaseUrl(
+    process.env.APP_BASE_URL ?? process.env.AUTH0_BASE_URL ?? process.env.NEXT_PUBLIC_APP_URL
+  );
 
   if (!domain || !clientId || !clientSecret || !secret || !appBaseUrl) {
     throw new Error(
