@@ -29,6 +29,10 @@ def run_research_agent(
         "opportunity_wedges": response.get("opportunity_wedges") or [],
         "risk_warnings": response.get("risk_warnings") or [],
         "summary": response.get("summary") or "",
+        "chat_message": response.get("chat_message") or "",
+        "next_step_suggestion": response.get("next_step_suggestion") or "",
+        "should_move_to_next_stage": bool(response.get("should_move_to_next_stage")),
+        "next_stage": response.get("next_stage") or "research",
     }
     return normalized, {
         "provider": trace.provider,

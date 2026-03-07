@@ -48,7 +48,11 @@ Output schema (exact top-level keys):
       "response": "string"
     }
   ],
-  "pricing_direction": "string"
+  "pricing_direction": "string",
+  "chat_message": "string",
+  "next_step_suggestion": "string",
+  "should_move_to_next_stage": false,
+  "next_stage": "positioning|execution"
 }
 
 Field quality standards:
@@ -60,4 +64,13 @@ Field quality standards:
 - benefits: each benefit must describe a measurable or observable outcome.
 - objection_handling.response: concise, credible, and execution-aware.
 - pricing_direction: practical for MVP stage and experimentation.
+- chat_message: user-friendly conversational explanation of the positioning recommendation and tradeoffs.
+- next_step_suggestion: one specific action the user should take now.
+- should_move_to_next_stage: true only when positioning is coherent enough for execution planning.
+- next_stage: set to "execution" when should_move_to_next_stage=true, otherwise "positioning".
+
+Chat behavior requirements:
+- End every response with a practical next step.
+- If positioning is strong and internally consistent, urge the user to move into Execution.
+- If positioning still has unresolved ambiguity, request one focused refinement step before moving on.
 """.strip()

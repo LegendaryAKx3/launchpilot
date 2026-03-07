@@ -33,6 +33,10 @@ def run_execution_plan_agent(
         },
         "tasks": response.get("tasks") or [],
         "kpis": response.get("kpis") or [],
+        "chat_message": response.get("chat_message") or "",
+        "next_step_suggestion": response.get("next_step_suggestion") or "",
+        "should_move_to_next_stage": bool(response.get("should_move_to_next_stage")),
+        "next_stage": response.get("next_stage") or "execution",
     }
     return normalized, {
         "provider": trace.provider,
@@ -52,7 +56,7 @@ def run_asset_generation_agent(
     project_id: str,
     advice: str | None = None,
     mode: str = "baseline",
-) -> tuple[list[dict], dict]:
+) -> tuple[dict, dict]:
     response, trace = backboard.run_json_stage(
         project_id=project_id,
         project_name=context.get("project", {}).get("name") or "project",
@@ -67,7 +71,14 @@ def run_asset_generation_agent(
         ),
     )
     assets = response.get("assets") or []
-    return assets, {
+    normalized = {
+        "assets": assets,
+        "chat_message": response.get("chat_message") or "",
+        "next_step_suggestion": response.get("next_step_suggestion") or "",
+        "should_move_to_next_stage": bool(response.get("should_move_to_next_stage")),
+        "next_stage": response.get("next_stage") or "execution",
+    }
+    return normalized, {
         "provider": trace.provider,
         "mode": trace.mode,
         "used_advice": trace.used_advice,
@@ -85,7 +96,7 @@ def run_email_personalization_agent(
     project_id: str,
     advice: str | None = None,
     mode: str = "baseline",
-) -> tuple[list[dict], dict]:
+) -> tuple[dict, dict]:
     response, trace = backboard.run_json_stage(
         project_id=project_id,
         project_name=context.get("project", {}).get("name") or "project",
@@ -105,7 +116,14 @@ def run_email_personalization_agent(
         drafts = response.get("messages")
     if drafts is None:
         drafts = response.get("emails")
-    return drafts or [], {
+    normalized = {
+        "drafts": drafts or [],
+        "chat_message": response.get("chat_message") or "",
+        "next_step_suggestion": response.get("next_step_suggestion") or "",
+        "should_move_to_next_stage": bool(response.get("should_move_to_next_stage")),
+        "next_stage": response.get("next_stage") or "execution",
+    }
+    return normalized, {
         "provider": trace.provider,
         "mode": trace.mode,
         "used_advice": trace.used_advice,

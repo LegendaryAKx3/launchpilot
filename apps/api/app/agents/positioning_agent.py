@@ -30,6 +30,10 @@ def run_positioning_agent(
         "benefits": response.get("benefits") or [],
         "objection_handling": response.get("objection_handling") or [],
         "pricing_direction": response.get("pricing_direction") or "",
+        "chat_message": response.get("chat_message") or "",
+        "next_step_suggestion": response.get("next_step_suggestion") or "",
+        "should_move_to_next_stage": bool(response.get("should_move_to_next_stage")),
+        "next_stage": response.get("next_stage") or "positioning",
     }
     return normalized, {
         "provider": trace.provider,

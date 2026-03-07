@@ -134,6 +134,10 @@ def run_research(
             "competitors": output.get("competitors", []),
             "pain_point_clusters": output.get("pain_point_clusters", []),
             "opportunity_wedges": output.get("opportunity_wedges", []),
+            "chat_message": output.get("chat_message", ""),
+            "next_step_suggestion": output.get("next_step_suggestion", ""),
+            "should_move_to_next_stage": bool(output.get("should_move_to_next_stage")),
+            "next_stage": output.get("next_stage", "research"),
         }
     )
 

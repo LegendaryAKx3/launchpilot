@@ -106,7 +106,7 @@ def generate_assets(
 
     context = build_project_context(db, project_id)
     try:
-        drafts, trace = run_asset_generation_agent(
+        output, trace = run_asset_generation_agent(
             context,
             payload.types,
             payload.count,
@@ -120,7 +120,7 @@ def generate_assets(
 
     created_assets = []
     fallback_type = payload.types[0] if payload.types else "asset"
-    for draft in drafts:
+    for draft in output.get("assets", []):
         asset = Asset(
             project_id=project_id,
             asset_type=draft.get("asset_type") or fallback_type,
@@ -152,7 +152,16 @@ def generate_assets(
         metadata={"agent_trace": trace, "mode": payload.mode, "advice": payload.advice, "count": len(created_assets)},
     )
     db.commit()
-    return success({"assets": created_assets, "agent_trace": trace})
+    return success(
+        {
+            "assets": created_assets,
+            "chat_message": output.get("chat_message", ""),
+            "next_step_suggestion": output.get("next_step_suggestion", ""),
+            "should_move_to_next_stage": bool(output.get("should_move_to_next_stage")),
+            "next_stage": output.get("next_stage", "execution"),
+            "agent_trace": trace,
+        }
+    )
 
 
 @router.post("/assets/advise")
@@ -194,7 +203,7 @@ def prepare_email_batch(
 
     context = build_project_context(db, project_id)
     try:
-        drafts, trace = run_email_personalization_agent(
+        output, trace = run_email_personalization_agent(
             context,
             subject_line=payload.subject_line,
             max_contacts=payload.max_contacts,
@@ -206,12 +215,33 @@ def prepare_email_batch(
     except BackboardRequestError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Backboard outreach draft failed: {exc}")
 
+    drafts = output.get("drafts", [])
     if not drafts:
-        return success({"prepared": False, "reason": "No contacts available", "agent_trace": trace})
+        return success(
+            {
+                "prepared": False,
+                "reason": "No contacts available",
+                "chat_message": output.get("chat_message", ""),
+                "next_step_suggestion": output.get("next_step_suggestion", ""),
+                "should_move_to_next_stage": bool(output.get("should_move_to_next_stage")),
+                "next_stage": output.get("next_stage", "execution"),
+                "agent_trace": trace,
+            }
+        )
 
     valid_drafts = [item for item in drafts if item.get("contact_id") and item.get("body")]
     if not valid_drafts:
-        return success({"prepared": False, "reason": "No valid drafts generated", "agent_trace": trace})
+        return success(
+            {
+                "prepared": False,
+                "reason": "No valid drafts generated",
+                "chat_message": output.get("chat_message", ""),
+                "next_step_suggestion": output.get("next_step_suggestion", ""),
+                "should_move_to_next_stage": bool(output.get("should_move_to_next_stage")),
+                "next_stage": output.get("next_stage", "execution"),
+                "agent_trace": trace,
+            }
+        )
 
     batch = OutboundBatch(project_id=project_id, status="pending_approval", subject_line=payload.subject_line)
     db.add(batch)
@@ -258,6 +288,10 @@ def prepare_email_batch(
             "approval_id": str(approval.id),
             "prepared": True,
             "messages_prepared": len(valid_drafts),
+            "chat_message": output.get("chat_message", ""),
+            "next_step_suggestion": output.get("next_step_suggestion", ""),
+            "should_move_to_next_stage": bool(output.get("should_move_to_next_stage")),
+            "next_stage": output.get("next_stage", "approvals"),
             "agent_trace": trace,
         }
     )

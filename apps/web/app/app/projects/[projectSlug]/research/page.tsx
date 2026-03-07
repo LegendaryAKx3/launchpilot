@@ -132,6 +132,10 @@ export default function ResearchPage() {
             description?: string;
             score?: number;
           }>;
+          chat_message?: string;
+          next_step_suggestion?: string;
+          should_move_to_next_stage?: boolean;
+          next_stage?: string;
         }>(`/projects/${projectId}/research/${endpoint}`, {
           method: "POST",
           body: JSON.stringify({
@@ -149,7 +153,17 @@ export default function ResearchPage() {
           opportunity_wedges: data.opportunity_wedges ?? []
         });
 
-        // Craft response based on results
+        const stageGuidance =
+          data.next_step_suggestion ||
+          (data.should_move_to_next_stage
+            ? "Research looks complete. Move to Positioning and choose the wedge you want to execute."
+            : "Continue refining research with one focused follow-up question.");
+
+        if (data.chat_message?.trim()) {
+          return `${data.chat_message.trim()}\n\n**Next step:** ${stageGuidance}`;
+        }
+
+        // Fallback response synthesis if chat_message was not returned
         const parts: string[] = [];
         if (data.run?.summary) {
           parts.push(data.run.summary);
@@ -167,7 +181,8 @@ export default function ResearchPage() {
           );
         }
 
-        return parts.join(" ") || "Research analysis complete. Check the insights panel for details.";
+        const fallback = parts.join(" ") || "Research analysis complete. Check the insights panel for details.";
+        return `${fallback}\n\n**Next step:** ${stageGuidance}`;
       } catch (runError) {
         setError(runError instanceof Error ? runError.message : "Failed to run research");
         return "I encountered an error while processing. Please try again.";

@@ -67,7 +67,11 @@ Output schema (exact top-level keys):
       "action_type": "string",
       "required_scope": "string"
     }
-  ]
+  ],
+  "chat_message": "string",
+  "next_step_suggestion": "string",
+  "should_move_to_next_stage": false,
+  "next_stage": "execution|approvals|completed"
 }
 
 Field quality standards:
@@ -78,4 +82,13 @@ Field quality standards:
 - assets.content: structured and practical, not placeholder text.
 - drafts.contact_id: must map to provided contact IDs only.
 - approval_requests: include only actions that should be human-approved.
+- chat_message: user-friendly summary of what was generated and what changed.
+- next_step_suggestion: concrete next action to keep momentum.
+- should_move_to_next_stage: true only when execution outputs are ready for approval/review.
+- next_stage: set to "approvals" (or "completed" when no gated actions remain) when should_move_to_next_stage=true, otherwise "execution".
+
+Chat behavior requirements:
+- End every response by suggesting the next action.
+- If execution output is sufficiently ready, explicitly push the user to Approvals/review flow.
+- If execution is not ready, suggest the most important missing execution step.
 """.strip()

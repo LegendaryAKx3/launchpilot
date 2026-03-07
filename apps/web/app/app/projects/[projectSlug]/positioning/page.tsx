@@ -122,7 +122,13 @@ export default function PositioningPage() {
 
       try {
         const endpoint = message.toLowerCase().includes("run") ? "run" : "advise";
-        const data = await apiFetch<{ agent_trace?: Record<string, unknown> }>(
+        const data = await apiFetch<{
+          agent_trace?: Record<string, unknown>;
+          chat_message?: string;
+          next_step_suggestion?: string;
+          should_move_to_next_stage?: boolean;
+          next_stage?: string;
+        }>(
           `/projects/${projectId}/positioning/${endpoint}`,
           {
             method: "POST",
@@ -137,7 +143,19 @@ export default function PositioningPage() {
         await loadVersions(projectId);
 
         const newVersions = versions.length;
-        return `I've generated positioning options based on your guidance. ${newVersions > 0 ? `You now have **${newVersions} versions** to choose from.` : ""} Review them in the panel and select the one that fits best.`;
+        const stageGuidance =
+          data.next_step_suggestion ||
+          (data.should_move_to_next_stage
+            ? "Positioning is ready. Move to Execution and generate your launch plan."
+            : "Refine one positioning assumption, then re-run for a tighter recommendation.");
+
+        if (data.chat_message?.trim()) {
+          return `${data.chat_message.trim()}\n\n**Next step:** ${stageGuidance}`;
+        }
+
+        return `I've generated positioning options based on your guidance. ${
+          newVersions > 0 ? `You now have **${newVersions} versions** to choose from.` : ""
+        } Review them in the panel and select the one that fits best.\n\n**Next step:** ${stageGuidance}`;
       } catch (runError) {
         setError(runError instanceof Error ? runError.message : "Failed to run positioning");
         return "I encountered an error while processing. Please try again.";

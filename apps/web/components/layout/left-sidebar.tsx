@@ -92,14 +92,6 @@ export function LeftSidebar() {
           );
         })}
       </nav>
-
-      {/* Footer with version */}
-      <div className="absolute bottom-4 left-4 right-4">
-        <div className="rounded-lg border border-edge-subtle bg-surface-muted p-3">
-          <p className="font-mono text-[10px] text-fg-faint">LaunchPilot v0.1.0</p>
-          <p className="mt-1 text-xs text-fg-muted">Multi-agent launch flow</p>
-        </div>
-      </div>
     </aside>
   );
 }

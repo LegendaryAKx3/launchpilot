@@ -19,7 +19,7 @@ def upgrade() -> None:
     op.create_table(
         "agent_chat_messages",
         sa.Column("id", sa.Uuid(), nullable=False),
-        sa.Column("project_id", sa.String(), nullable=False),
+        sa.Column("project_id", sa.Uuid(), nullable=False),
         sa.Column("agent_type", sa.String(), nullable=False),
         sa.Column("role", sa.String(), nullable=False),
         sa.Column("content", sa.Text(), nullable=False),

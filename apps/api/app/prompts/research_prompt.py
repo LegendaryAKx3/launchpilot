@@ -66,7 +66,11 @@ Output schema (exact top-level keys):
     }
   ],
   "risk_warnings": ["string"],
-  "summary": "string"
+  "summary": "string",
+  "chat_message": "string",
+  "next_step_suggestion": "string",
+  "should_move_to_next_stage": false,
+  "next_stage": "research|positioning"
 }
 
 Field quality standards:
@@ -77,4 +81,13 @@ Field quality standards:
 - pain_point_clusters.evidence: concise, concrete statements from available context.
 - opportunity_wedges.description: describe the angle, why it can win, and what makes it defensible.
 - summary: 5-8 sentences with clear focus recommendation and key tradeoffs.
+- chat_message: user-friendly conversational response that explains what was learned and why it matters.
+- next_step_suggestion: one specific next action the user should take now.
+- should_move_to_next_stage: true only when research is sufficiently complete and actionable.
+- next_stage: set to "positioning" when should_move_to_next_stage=true, otherwise "research".
+
+Chat behavior requirements:
+- End every response by guiding the user to a concrete next action.
+- If research is complete, explicitly encourage moving to Positioning and explain why now.
+- If research is not complete, suggest the highest-leverage follow-up research step.
 """.strip()

@@ -148,7 +148,14 @@ export default function ExecutionPage() {
       setError(null);
 
       try {
-        const data = await apiFetch<{ agent_trace?: Record<string, unknown> }>(
+        const data = await apiFetch<{
+          agent_trace?: Record<string, unknown>;
+          chat_message?: string;
+          next_step_suggestion?: string;
+          should_move_to_next_stage?: boolean;
+          next_stage?: string;
+          prepared?: boolean;
+        }>(
           `/projects/${projectId}/execution/${path}`,
           {
             method: "POST",
@@ -159,13 +166,26 @@ export default function ExecutionPage() {
         if (!data) throw new Error(`Failed action: ${action}`);
         await loadState(projectId);
 
+        const stageGuidance =
+          data.next_step_suggestion ||
+          (data.should_move_to_next_stage
+            ? "Execution output is ready for review. Move to Approvals to authorize sensitive actions."
+            : "Continue in Execution with the next highest-impact action.");
+
+        if (data.chat_message?.trim()) {
+          return `${data.chat_message.trim()}\n\n**Next step:** ${stageGuidance}`;
+        }
+
         const responses: Record<string, string> = {
           plan: `I've updated the execution plan based on your guidance. You now have **${state.tasks.length} tasks** across 7 days.`,
-          assets: `I've generated new assets for you. Check the Assets section in the panel to review them.`,
-          outreach: `Outreach batch prepared. Review and approve it before sending.`
+          assets: "I've generated new assets for you. Check the Assets section in the panel to review them.",
+          outreach: data.prepared
+            ? "Outreach batch prepared. Review and approve it before sending."
+            : "Outreach draft generation completed, but no send-ready batch was created yet."
         };
 
-        return responses[action] || "Action completed. Check the panel for updates.";
+        const fallback = responses[action] || "Action completed. Check the panel for updates.";
+        return `${fallback}\n\n**Next step:** ${stageGuidance}`;
       } catch (actionError) {
         setError(actionError instanceof Error ? actionError.message : "Failed execution action");
         return "I encountered an error. Please try again.";

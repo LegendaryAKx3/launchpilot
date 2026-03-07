@@ -49,7 +49,7 @@ def get_chat_messages(
                 "id": str(m.id),
                 "role": m.role,
                 "content": m.content,
-                "metadata": m.metadata,
+                "metadata": m.message_metadata,
                 "timestamp": m.created_at.isoformat(),
             }
             for m in messages
@@ -74,7 +74,7 @@ def save_chat_messages(
             agent_type=agent_type,
             role=msg.role,
             content=msg.content,
-            metadata=msg.metadata,
+            message_metadata=msg.metadata,
         )
         db.add(message)
         db.flush()
@@ -82,7 +82,7 @@ def save_chat_messages(
             "id": str(message.id),
             "role": message.role,
             "content": message.content,
-            "metadata": message.metadata,
+            "metadata": message.message_metadata,
             "timestamp": message.created_at.isoformat(),
         })
 
