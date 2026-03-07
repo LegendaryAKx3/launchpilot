@@ -1,7 +1,9 @@
+import json
 from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.agents.execution_agent import run_asset_generation_agent, run_email_personalization_agent, run_execution_plan_agent
@@ -11,7 +13,7 @@ from app.integrations.backboard_client import BackboardRequestError
 from app.models.approval import Approval
 from app.models.execution import Asset, Contact, LaunchPlan, LaunchTask, OutboundBatch, OutboundMessage
 from app.routers.utils import success
-from app.schemas.execution import AssetGenerationRequest, ContactsUpsertRequest, EmailBatchPrepareRequest, ExecutionPlanRequest
+from app.schemas.execution import AssetGenerationRequest, AssetUpdateRequest, ContactsUpsertRequest, ContactUpdateRequest, EmailBatchPrepareRequest, ExecutionPlanRequest, TaskUpdateRequest
 from app.security.auth0 import CurrentUser
 from app.security.permissions import require_scope
 from app.services.audit_service import AuditService
@@ -21,6 +23,93 @@ from app.services.execution_service import ExecutionService
 from app.services.project_service import ProjectService
 
 router = APIRouter(prefix="/projects/{project_id}/execution", tags=["execution"])
+
+
+def _normalize_email(email: str | None) -> str | None:
+    if not email:
+        return None
+    return email.strip().lower()
+
+
+def _get_current_launch_plan(db: Session, project_id: UUID) -> LaunchPlan | None:
+    plans = (
+        db.query(LaunchPlan)
+        .filter(LaunchPlan.project_id == project_id)
+        .order_by(LaunchPlan.created_at.desc())
+        .all()
+    )
+    if not plans:
+        return None
+
+    current = plans[0]
+    for stale_plan in plans[1:]:
+        db.delete(stale_plan)
+    db.flush()
+    return current
+
+
+def _replace_launch_tasks(db: Session, plan_id: str | UUID, tasks: list[dict]) -> None:
+    db.query(LaunchTask).filter(LaunchTask.launch_plan_id == plan_id).delete()
+    db.flush()
+
+    for task in tasks:
+        title = task.get("title")
+        if not title:
+            continue
+        db.add(
+            LaunchTask(
+                launch_plan_id=plan_id,
+                day_number=task.get("day_number"),
+                title=title,
+                description=task.get("description"),
+                priority=task.get("priority", 3),
+            )
+        )
+
+
+def _dedupe_assets(assets: list[Asset]) -> list[Asset]:
+    seen: set[str] = set()
+    deduped: list[Asset] = []
+    for asset in assets:
+        key = json.dumps(
+            {
+                "asset_type": asset.asset_type,
+                "title": asset.title,
+                "status": asset.status,
+                "content": asset.content or {},
+            },
+            sort_keys=True,
+            default=str,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(asset)
+    return deduped
+
+
+def _dedupe_contacts(contacts: list[Contact]) -> list[Contact]:
+    seen: set[str] = set()
+    deduped: list[Contact] = []
+    for contact in contacts:
+        key = _normalize_email(contact.email) or str(contact.id)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(contact)
+    return deduped
+
+
+def _active_batches(batches: list[OutboundBatch]) -> list[OutboundBatch]:
+    current_pending_seen = False
+    filtered: list[OutboundBatch] = []
+    for batch in batches:
+        if batch.status in {"draft", "pending_approval"}:
+            if current_pending_seen:
+                continue
+            current_pending_seen = True
+        filtered.append(batch)
+    return filtered
 
 
 @router.post("/plan")
@@ -46,30 +135,26 @@ def generate_execution_plan(
     except BackboardRequestError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Backboard execution planning failed: {exc}")
 
-    plan = LaunchPlan(
-        project_id=project_id,
-        positioning_version_id=str(payload.positioning_version_id) if payload.positioning_version_id else None,
-        primary_channel=output["launch_strategy"]["primary_channel"],
-        secondary_channels=output["launch_strategy"]["secondary_channels"],
-        kpis=output.get("kpis", []),
-        status="active",
-    )
-    db.add(plan)
-    db.flush()
-
-    for task in output.get("tasks", []):
-        title = task.get("title")
-        if not title:
-            continue
-        db.add(
-            LaunchTask(
-                launch_plan_id=plan.id,
-                day_number=task.get("day_number"),
-                title=title,
-                description=task.get("description"),
-                priority=task.get("priority", 3),
-            )
+    plan = _get_current_launch_plan(db, project_id)
+    if plan:
+        plan.positioning_version_id = str(payload.positioning_version_id) if payload.positioning_version_id else None
+        plan.primary_channel = output["launch_strategy"]["primary_channel"]
+        plan.secondary_channels = output["launch_strategy"]["secondary_channels"]
+        plan.kpis = output.get("kpis", [])
+        plan.status = "active"
+    else:
+        plan = LaunchPlan(
+            project_id=project_id,
+            positioning_version_id=str(payload.positioning_version_id) if payload.positioning_version_id else None,
+            primary_channel=output["launch_strategy"]["primary_channel"],
+            secondary_channels=output["launch_strategy"]["secondary_channels"],
+            kpis=output.get("kpis", []),
+            status="active",
         )
+        db.add(plan)
+        db.flush()
+
+    _replace_launch_tasks(db, plan.id, output.get("tasks", []))
 
     project.stage = "execution"
     AuditService(db).log(
@@ -124,6 +209,20 @@ def generate_assets(
         )
     except BackboardRequestError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Backboard asset generation failed: {exc}")
+
+    existing_drafts = (
+        db.query(Asset)
+        .filter(
+            Asset.project_id == project_id,
+            Asset.created_by_agent == "execution_agent",
+            Asset.status == "draft",
+            Asset.asset_type.in_(payload.types),
+        )
+        .all()
+    )
+    for asset in existing_drafts:
+        db.delete(asset)
+    db.flush()
 
     created_assets = []
     fallback_type = payload.types[0] if payload.types else "asset"
@@ -197,9 +296,33 @@ def upsert_contacts(
     ProjectService(db).get_project_or_404(project_id)
     inserted_ids = []
     for contact in payload.contacts:
-        row = Contact(project_id=project_id, **contact.model_dump())
-        db.add(row)
-        db.flush()
+        normalized_email = _normalize_email(str(contact.email))
+        row = (
+            db.query(Contact)
+            .filter(
+                Contact.project_id == project_id,
+                func.lower(Contact.email) == normalized_email,
+            )
+            .order_by(Contact.created_at.desc())
+            .first()
+        )
+        if row:
+            row.name = contact.name
+            row.email = normalized_email
+            row.company = contact.company
+            row.segment = contact.segment
+            row.personalization_notes = contact.personalization_notes
+        else:
+            row = Contact(
+                project_id=project_id,
+                name=contact.name,
+                email=normalized_email,
+                company=contact.company,
+                segment=contact.segment,
+                personalization_notes=contact.personalization_notes,
+            )
+            db.add(row)
+            db.flush()
         inserted_ids.append(str(row.id))
     db.commit()
     BackboardProjectStateService(db).sync_after_action(
@@ -274,9 +397,36 @@ def prepare_email_batch(
             }
         )
 
-    batch = OutboundBatch(project_id=project_id, status="pending_approval", subject_line=payload.subject_line)
-    db.add(batch)
-    db.flush()
+    existing_batches = (
+        db.query(OutboundBatch)
+        .filter(
+            OutboundBatch.project_id == project_id,
+            OutboundBatch.status.in_(["draft", "pending_approval"]),
+        )
+        .order_by(OutboundBatch.created_at.desc())
+        .all()
+    )
+    batch = existing_batches[0] if existing_batches else None
+    for stale_batch in existing_batches[1:]:
+        db.query(Approval).filter(
+            Approval.project_id == project_id,
+            Approval.resource_type == "outbound_batch",
+            Approval.resource_id == str(stale_batch.id),
+            Approval.status == "pending",
+        ).delete()
+        db.delete(stale_batch)
+
+    if batch:
+        db.query(OutboundMessage).filter(OutboundMessage.batch_id == batch.id).delete()
+        batch.status = "pending_approval"
+        batch.subject_line = payload.subject_line
+        batch.send_count = 0
+        batch.approved_at = None
+        batch.sent_at = None
+    else:
+        batch = OutboundBatch(project_id=project_id, status="pending_approval", subject_line=payload.subject_line)
+        db.add(batch)
+        db.flush()
 
     for draft in valid_drafts:
         db.add(
@@ -289,18 +439,36 @@ def prepare_email_batch(
             )
         )
 
-    approval = Approval(
-        project_id=project_id,
-        action_type="send_email_batch",
-        resource_type="outbound_batch",
-        resource_id=str(batch.id),
-        status="pending",
-        requested_by_agent="execution_agent",
-        reason="Ready to send outbound batch",
-        required_scope="execution:send",
-        requires_step_up=False,
+    approval = (
+        db.query(Approval)
+        .filter(
+            Approval.project_id == project_id,
+            Approval.resource_type == "outbound_batch",
+            Approval.resource_id == str(batch.id),
+            Approval.status == "pending",
+        )
+        .order_by(Approval.created_at.desc())
+        .first()
     )
-    db.add(approval)
+    if approval:
+        approval.action_type = "send_email_batch"
+        approval.requested_by_agent = "execution_agent"
+        approval.reason = "Ready to send outbound batch"
+        approval.required_scope = "execution:send"
+        approval.requires_step_up = False
+    else:
+        approval = Approval(
+            project_id=project_id,
+            action_type="send_email_batch",
+            resource_type="outbound_batch",
+            resource_id=str(batch.id),
+            status="pending",
+            requested_by_agent="execution_agent",
+            reason="Ready to send outbound batch",
+            required_scope="execution:send",
+            requires_step_up=False,
+        )
+        db.add(approval)
 
     AuditService(db).log(
         project_id,
@@ -389,17 +557,32 @@ def get_execution_state(
     db: Session = Depends(get_db),
 ):
     ProjectService(db).get_project_or_404(project_id)
-    plans = db.query(LaunchPlan).filter(LaunchPlan.project_id == project_id).order_by(LaunchPlan.created_at.desc()).all()
+    plans = (
+        db.query(LaunchPlan)
+        .filter(LaunchPlan.project_id == project_id)
+        .order_by(LaunchPlan.created_at.desc())
+        .limit(1)
+        .all()
+    )
     plan_ids = [plan.id for plan in plans]
     tasks = db.query(LaunchTask).filter(LaunchTask.launch_plan_id.in_(plan_ids)).order_by(LaunchTask.day_number.asc()).all() if plan_ids else []
-    assets = db.query(Asset).filter(Asset.project_id == project_id).order_by(Asset.created_at.desc()).all()
-    contacts = db.query(Contact).filter(Contact.project_id == project_id).all()
-    batches = db.query(OutboundBatch).filter(OutboundBatch.project_id == project_id).order_by(OutboundBatch.created_at.desc()).all()
+    assets = _dedupe_assets(
+        db.query(Asset).filter(Asset.project_id == project_id).order_by(Asset.created_at.desc()).all()
+    )
+    contacts = _dedupe_contacts(
+        db.query(Contact).filter(Contact.project_id == project_id).order_by(Contact.created_at.desc()).all()
+    )
+    batches = _active_batches(
+        db.query(OutboundBatch).filter(OutboundBatch.project_id == project_id).order_by(OutboundBatch.created_at.desc()).all()
+    )
+    batch_ids = [batch.id for batch in batches]
     messages = (
         db.query(OutboundMessage)
         .join(OutboundBatch, OutboundMessage.batch_id == OutboundBatch.id)
-        .filter(OutboundBatch.project_id == project_id)
+        .filter(OutboundBatch.project_id == project_id, OutboundBatch.id.in_(batch_ids))
         .all()
+        if batch_ids
+        else []
     )
 
     return success(
@@ -456,6 +639,8 @@ def get_execution_state(
                     "batch_id": str(m.batch_id),
                     "status": m.status,
                     "subject": m.subject,
+                    "body": m.body,
+                    "contact_id": str(m.contact_id) if m.contact_id else None,
                     "error_message": m.error_message,
                 }
                 for m in messages
@@ -463,3 +648,109 @@ def get_execution_state(
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
     )
+
+
+@router.patch("/tasks/{task_id}")
+def update_task(
+    project_id: UUID,
+    task_id: UUID,
+    payload: TaskUpdateRequest,
+    _scope: CurrentUser = Depends(require_scope("execution:run")),
+    db: Session = Depends(get_db),
+):
+    ProjectService(db).get_project_or_404(project_id)
+
+    task = db.query(LaunchTask).filter(LaunchTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+    # Verify task belongs to a plan owned by this project
+    plan = db.query(LaunchPlan).filter(LaunchPlan.id == task.launch_plan_id, LaunchPlan.project_id == project_id).first()
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found in this project")
+
+    if payload.title is not None:
+        task.title = payload.title
+    if payload.description is not None:
+        task.description = payload.description
+    if payload.day_number is not None:
+        task.day_number = payload.day_number
+    if payload.priority is not None:
+        task.priority = payload.priority
+    if payload.status is not None:
+        task.status = payload.status
+
+    db.commit()
+    return success({"task_id": str(task.id), "updated": True})
+
+
+@router.patch("/assets/{asset_id}")
+def update_asset(
+    project_id: UUID,
+    asset_id: UUID,
+    payload: AssetUpdateRequest,
+    _scope: CurrentUser = Depends(require_scope("execution:run")),
+    db: Session = Depends(get_db),
+):
+    ProjectService(db).get_project_or_404(project_id)
+
+    asset = db.query(Asset).filter(Asset.id == asset_id, Asset.project_id == project_id).first()
+    if not asset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+
+    if payload.title is not None:
+        asset.title = payload.title
+    if payload.content is not None:
+        asset.content = payload.content
+    if payload.status is not None:
+        asset.status = payload.status
+
+    db.commit()
+    return success({"asset_id": str(asset.id), "updated": True})
+
+
+@router.patch("/contacts/{contact_id}")
+def update_contact(
+    project_id: UUID,
+    contact_id: UUID,
+    payload: ContactUpdateRequest,
+    _scope: CurrentUser = Depends(require_scope("execution:run")),
+    db: Session = Depends(get_db),
+):
+    ProjectService(db).get_project_or_404(project_id)
+
+    contact = db.query(Contact).filter(Contact.id == contact_id, Contact.project_id == project_id).first()
+    if not contact:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
+
+    if payload.name is not None:
+        contact.name = payload.name
+    if payload.email is not None:
+        contact.email = payload.email
+    if payload.segment is not None:
+        contact.segment = payload.segment
+    if payload.company is not None:
+        contact.company = payload.company
+    if payload.personalization_notes is not None:
+        contact.personalization_notes = payload.personalization_notes
+
+    db.commit()
+    return success({"contact_id": str(contact.id), "updated": True})
+
+
+@router.delete("/contacts/{contact_id}")
+def delete_contact(
+    project_id: UUID,
+    contact_id: UUID,
+    _scope: CurrentUser = Depends(require_scope("execution:run")),
+    db: Session = Depends(get_db),
+):
+    ProjectService(db).get_project_or_404(project_id)
+
+    contact = db.query(Contact).filter(Contact.id == contact_id, Contact.project_id == project_id).first()
+    if not contact:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
+
+    db.delete(contact)
+    db.commit()
+    return success({"contact_id": str(contact_id), "deleted": True})

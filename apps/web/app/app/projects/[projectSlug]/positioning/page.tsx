@@ -14,6 +14,7 @@ import {
   InsightSection
 } from "@/components/chat/insight-panel";
 import { apiFetch } from "@/lib/api";
+import { isLocalMessageId, mergeSavedMessages } from "@/lib/agent-chat";
 
 interface ProjectRow {
   id: string;
@@ -64,11 +65,12 @@ export default function PositioningPage() {
   const saveChatMessages = useCallback(
     async (newMessages: Message[]) => {
       if (!projectId) return;
-      const existingIds = new Set(messages.map((m) => m.id));
-      const toSave = newMessages.filter((m) => !existingIds.has(m.id) || m.id.includes("-"));
+      const toSave = newMessages.filter((m) => isLocalMessageId(m.id));
 
       if (toSave.length > 0) {
-        await apiFetch(`/projects/${projectId}/chat/positioning`, {
+        const saved = await apiFetch<{ messages: Array<{ id: string; role: string; content: string; timestamp: string }> }>(
+          `/projects/${projectId}/chat/positioning`,
+          {
           method: "POST",
           body: JSON.stringify({
             messages: toSave.map((m) => ({
@@ -76,11 +78,14 @@ export default function PositioningPage() {
               content: m.content
             }))
           })
-        });
+          }
+        );
+        setMessages(mergeSavedMessages(newMessages, saved?.messages ?? []));
+        return;
       }
       setMessages(newMessages);
     },
-    [projectId, messages]
+    [projectId]
   );
 
   const loadVersions = useCallback(async (resolvedProjectId: string) => {

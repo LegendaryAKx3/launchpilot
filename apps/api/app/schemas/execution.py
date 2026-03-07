@@ -39,3 +39,25 @@ class EmailBatchPrepareRequest(BaseModel):
 class EmailBatchSendResponse(BaseModel):
     batch_id: uuid.UUID
     status: str
+
+
+class TaskUpdateRequest(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    day_number: int | None = None
+    priority: int | None = None
+    status: str | None = None
+
+
+class AssetUpdateRequest(BaseModel):
+    title: str | None = None
+    content: dict | None = None
+    status: str | None = None
+
+
+class ContactUpdateRequest(BaseModel):
+    name: str | None = None
+    email: EmailStr | None = None
+    segment: str | None = None
+    company: str | None = None
+    personalization_notes: str | None = None

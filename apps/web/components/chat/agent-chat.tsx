@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { createLocalMessageId } from "@/lib/agent-chat";
+
 import { ChatMessage, Message } from "./chat-message";
 import { ChatInput, ChatInputHandle } from "./chat-input";
 
@@ -46,7 +48,7 @@ export function AgentChat({
   const handleSend = useCallback(
     async (content: string) => {
       const userMessage: Message = {
-        id: crypto.randomUUID(),
+        id: createLocalMessageId("user"),
         role: "user",
         content,
         timestamp: new Date()
@@ -58,7 +60,7 @@ export function AgentChat({
 
       if (response) {
         const agentMessage: Message = {
-          id: crypto.randomUUID(),
+          id: createLocalMessageId("assistant"),
           role: "assistant",
           content: response,
           timestamp: new Date()

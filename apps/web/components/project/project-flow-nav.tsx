@@ -29,12 +29,6 @@ const steps = [
     label: "Execution",
     icon: "4",
     href: (projectSlug: string) => `/app/projects/${projectSlug}/execution`
-  },
-  {
-    key: "approvals",
-    label: "Approvals",
-    icon: "5",
-    href: (projectSlug: string) => `/app/projects/${projectSlug}/approvals`
   }
 ];
 
@@ -43,7 +37,7 @@ export function ProjectFlowNav({ projectSlug }: { projectSlug: string }) {
 
   return (
     <nav className="rounded-xl border border-edge-subtle bg-surface-muted p-1.5">
-      <div className="grid grid-cols-5 gap-1">
+      <div className="grid grid-cols-4 gap-1">
         {steps.map((step) => {
           const isActive = pathname === step.href(projectSlug);
           return (
