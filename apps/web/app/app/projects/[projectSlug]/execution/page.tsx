@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AgentChat } from "@/components/chat/agent-chat";
 import { Message } from "@/components/chat/chat-message";
 import { ExecutionTabs, ExecutionTab } from "@/components/execution/execution-tabs";
-import { PlansList, PlanDetail, TaskDrawer, Plan, Task } from "@/components/execution/plans";
+import { PlanView, TaskDrawer, Plan, Task } from "@/components/execution/plans";
 import { AssetsList, AssetDetail, Asset } from "@/components/execution/assets";
 import {
   OutreachSubTabs,
@@ -57,7 +57,7 @@ export default function ExecutionPage() {
     messages: []
   });
   const [pageState, setPageState] = useState<ExecutionPageState>({
-    activeTab: "outreach",
+    activeTab: "plan",
     selectedItemId: null,
     outreachSubTab: "batches"
   });
@@ -170,92 +170,138 @@ export default function ExecutionPage() {
       if (!projectId) return null;
 
       const lowerMessage = message.toLowerCase();
-      let action = "plan";
-      let path = "plan/advise";
-      let body: Record<string, unknown> = { advice: message, mode };
-
-      if (lowerMessage.includes("image ad") || lowerMessage.includes("ad image") || lowerMessage.includes("visual ad")) {
-        action = "assets";
-        path = "image-ad/draft";
-        body = {
-          advice: message,
-          mode
-        };
-      } else if (lowerMessage.includes("asset") || lowerMessage.includes("content") || lowerMessage.includes("copy")) {
-        action = "assets";
-        path = "assets/advise";
-        body = {
-          types: ["email_copy"],
-          count: 1,
-          advice: message,
-          mode
-        };
-      } else if (lowerMessage.includes("email") || lowerMessage.includes("outreach") || lowerMessage.includes("contact") || lowerMessage.includes("send")) {
-        action = "outreach";
-        path = "email-batch/prepare/advise";
-        body = {
-          subject_line: null,
-          max_contacts: 10,
-          advice: message,
-          mode
-        };
-      }
-
-      setRunningAction(action);
+      setRunningAction("plan");
       setError(null);
 
       try {
-        let data = await apiFetch<{
-          agent_trace?: Record<string, unknown>;
+        // Always run the plan agent first to create/update the launch plan
+        const planData = await apiFetch<{
           chat_message?: string;
           next_step_suggestion?: string;
-          should_move_to_next_stage?: boolean;
-          next_stage?: string;
-          prepared?: boolean;
         }>(
-          `/projects/${projectId}/execution/${path}`,
+          `/projects/${projectId}/execution/plan/advise`,
           {
             method: "POST",
-            body: JSON.stringify(body)
+            body: JSON.stringify({ advice: message, mode })
           }
         );
 
-        if (action === "assets" && path === "assets/advise") {
-          await apiFetch(`/projects/${projectId}/execution/image-ad/draft`, {
-            method: "POST",
-            body: JSON.stringify({
-              advice: message,
-              mode
-            })
-          });
-          data = data ?? {
-            chat_message: "Generated email copy and an image ad prompt draft."
-          };
+        let additionalResponse = "";
+        let switchToTab: "assets" | "outreach" | null = null;
+
+        // Check for distribution/promo asset generation
+        const isDistributionRequest =
+          lowerMessage.includes("distribution") ||
+          lowerMessage.includes("promo") ||
+          lowerMessage.includes("promotional") ||
+          lowerMessage.includes("marketing") ||
+          lowerMessage.includes("variations") ||
+          (lowerMessage.includes("generate") && (
+            lowerMessage.includes("dm") ||
+            lowerMessage.includes("email") ||
+            lowerMessage.includes("video") ||
+            lowerMessage.includes("script") ||
+            lowerMessage.includes("ad") ||
+            lowerMessage.includes("content")
+          )) ||
+          lowerMessage.includes("cold dm") ||
+          lowerMessage.includes("cold email") ||
+          lowerMessage.includes("video script") ||
+          lowerMessage.includes("tiktok") ||
+          lowerMessage.includes("instagram") ||
+          lowerMessage.includes("reels");
+
+        const isAssetRequest =
+          lowerMessage.includes("asset") ||
+          lowerMessage.includes("content") ||
+          lowerMessage.includes("copy") ||
+          lowerMessage.includes("image ad") ||
+          lowerMessage.includes("ad image") ||
+          lowerMessage.includes("visual ad");
+
+        const isOutreachRequest =
+          lowerMessage.includes("outreach") ||
+          lowerMessage.includes("contact") ||
+          lowerMessage.includes("send");
+
+        // Run additional actions based on message content
+        if (isDistributionRequest || isAssetRequest) {
+          setRunningAction("assets");
+          const channels: string[] = [];
+          if (lowerMessage.includes("dm") || lowerMessage.includes("twitter") || lowerMessage.includes("linkedin")) {
+            channels.push("cold_dm");
+          }
+          if (lowerMessage.includes("email") || lowerMessage.includes("cold")) {
+            channels.push("cold_email");
+          }
+          if (lowerMessage.includes("image") || lowerMessage.includes("ad") || lowerMessage.includes("visual")) {
+            channels.push("image_ad_prompt");
+          }
+          if (lowerMessage.includes("video") || lowerMessage.includes("script") || lowerMessage.includes("tiktok") || lowerMessage.includes("reel")) {
+            channels.push("video_script");
+          }
+
+          const assetsData = await apiFetch<{
+            chat_message?: string;
+            assets?: Array<{ id: string; asset_type: string; title: string }>;
+            recommended_channels?: string[];
+            testing_strategy?: string;
+          }>(
+            `/projects/${projectId}/execution/distribution-assets`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                channels: channels.length > 0 ? channels : null,
+                variations_per_channel: 3,
+                advice: message,
+                mode
+              })
+            }
+          );
+
+          if (assetsData?.assets?.length) {
+            additionalResponse = `\n\nGenerated ${assetsData.assets.length} asset variations.`;
+            if (assetsData.testing_strategy) {
+              additionalResponse += ` ${assetsData.testing_strategy}`;
+            }
+            switchToTab = "assets";
+          }
+        } else if (isOutreachRequest) {
+          setRunningAction("outreach");
+          const outreachData = await apiFetch<{
+            chat_message?: string;
+            prepared?: boolean;
+          }>(
+            `/projects/${projectId}/execution/email-batch/prepare/advise`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                subject_line: null,
+                max_contacts: 10,
+                advice: message,
+                mode
+              })
+            }
+          );
+
+          if (outreachData?.prepared) {
+            additionalResponse = "\n\nEmail batch ready for review in the Outreach tab.";
+            switchToTab = "outreach";
+          }
         }
 
-        if (!data) throw new Error(`Failed action: ${action}`);
         await loadState(projectId);
-        if (action === "assets") {
+
+        if (switchToTab) {
           setPageState((s) => ({
             ...s,
-            activeTab: "assets",
+            activeTab: switchToTab!,
             selectedItemId: null
           }));
         }
 
-        if (data.chat_message?.trim()) {
-          return data.chat_message.trim();
-        }
-
-        const responses: Record<string, string> = {
-          plan: `Plan updated! Check the Plans tab to see your tasks.`,
-          assets: "Assets generated! Switch to the Assets tab to review.",
-          outreach: data.prepared
-            ? "Email batch ready! Review and approve it in the Outreach tab."
-            : "Outreach content created."
-        };
-
-        return responses[action] || "Done! Check the panel on the right.";
+        const baseResponse = planData?.chat_message?.trim() || "Plan updated with your daily targets.";
+        return baseResponse + additionalResponse;
       } catch (actionError) {
         setError(actionError instanceof Error ? actionError.message : "Failed execution action");
         return "Something went wrong. Please try again.";
@@ -330,27 +376,6 @@ export default function ExecutionPage() {
     },
     [projectId, loadState]
   );
-
-  const handleGenerateImageAdDraft = useCallback(async () => {
-    if (!projectId) return;
-    setRunningAction("assets");
-    setError(null);
-    try {
-      await apiFetch(`/projects/${projectId}/execution/image-ad/draft`, {
-        method: "POST",
-        body: JSON.stringify({
-          advice: "Create a detailed image ad prompt using all known project context",
-          mode: "deepen"
-        })
-      });
-      await loadState(projectId);
-      setPageState((s) => ({ ...s, activeTab: "assets" }));
-    } catch (draftError) {
-      setError(draftError instanceof Error ? draftError.message : "Failed to generate image ad draft");
-    } finally {
-      setRunningAction(null);
-    }
-  }, [projectId, loadState]);
 
   // Contact handlers
   const handleAddContact = useCallback(
@@ -449,11 +474,10 @@ export default function ExecutionPage() {
     [state.tasks]
   );
 
-  const selectedPlan = useMemo(
-    () => pageState.activeTab === "plans" && pageState.selectedItemId
-      ? state.plans.find((p) => p.id === pageState.selectedItemId) || null
-      : null,
-    [pageState.activeTab, pageState.selectedItemId, state.plans]
+  // Get the single plan (first one if exists)
+  const currentPlan = useMemo(
+    () => state.plans.length > 0 ? state.plans[0] : null,
+    [state.plans]
   );
 
   const selectedAsset = useMemo(
@@ -481,24 +505,24 @@ export default function ExecutionPage() {
   const quickActions = useMemo(() => {
     const actions = [];
 
-    // Always offer plan creation if none exists
+    // Primary action: Generate distribution assets (3 variations across all channels)
+    if (state.assets.length === 0) {
+      actions.push({
+        label: "Generate distribution assets",
+        message: "Generate cold DMs, cold emails, image ad prompts, and video scripts for this launch with 3 variations of each"
+      });
+    } else {
+      actions.push({
+        label: "Generate more variations",
+        message: "Generate additional distribution asset variations across all channels"
+      });
+    }
+
+    // Offer plan creation if none exists
     if (state.plans.length === 0) {
       actions.push({
         label: "Create a 7-day launch plan",
         message: "Create a comprehensive 7-day execution plan for launch with daily tasks and milestones"
-      });
-    }
-
-    // Offer asset generation
-    if (state.assets.length === 0) {
-      actions.push({
-        label: "Generate email + image ad prompt",
-        message: "Generate email copy and a detailed image ad generation prompt for this launch"
-      });
-    } else {
-      actions.push({
-        label: "Generate more email + image prompts",
-        message: "Generate additional email copy and image ad prompt variations"
       });
     }
 
@@ -512,6 +536,14 @@ export default function ExecutionPage() {
       actions.push({
         label: "Set up outreach contacts",
         message: "Help me add and organize my outreach contact list"
+      });
+    }
+
+    // Offer channel-specific generation for users who want to focus
+    if (state.assets.length > 0) {
+      actions.push({
+        label: "Generate video scripts only",
+        message: "Generate 3 TikTok and Instagram Reels video script variations"
       });
     }
 
@@ -583,7 +615,7 @@ export default function ExecutionPage() {
         {/* Action Panel (Right - 60%) */}
         <div className="flex flex-1 flex-col overflow-hidden rounded-xl border border-edge-subtle bg-surface-muted">
           {/* Tabs */}
-          <div className="flex items-center justify-between border-b border-edge-subtle bg-surface-subtle/50 px-4 py-2">
+          <div className="border-b border-edge-subtle bg-surface-subtle/50 px-4 py-2">
             <ExecutionTabs
               activeTab={pageState.activeTab}
               onTabChange={(tab) =>
@@ -594,192 +626,162 @@ export default function ExecutionPage() {
                 }))
               }
               counts={{
-                plans: state.plans.length,
+                hasPlan: state.plans.length > 0,
                 assets: state.assets.length,
                 contacts: state.contacts.length,
                 pendingBatches: pendingBatches.length
               }}
             />
-            {pageState.activeTab === "assets" && (
-              <button
-                onClick={handleGenerateImageAdDraft}
-                disabled={runningAction !== null}
-                className="ml-2 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-              >
-                Generate Image Ad Prompt
-              </button>
-            )}
           </div>
 
-          {/* Content Area - List + Detail */}
+          {/* Content Area */}
           <div className="flex flex-1 overflow-hidden">
-            {/* List Panel */}
-            <div className="w-2/5 min-w-[200px] overflow-hidden border-r border-edge-subtle bg-surface-subtle/30">
-              {pageState.activeTab === "outreach" && (
-                <div className="flex h-full flex-col">
-                  <OutreachSubTabs
-                    activeTab={pageState.outreachSubTab}
-                    onTabChange={(tab) =>
-                      setPageState((s) => ({
-                        ...s,
-                        outreachSubTab: tab,
-                        selectedItemId: null
-                      }))
-                    }
-                    contactCount={state.contacts.length}
-                    batchCount={state.batches.length}
-                    pendingCount={pendingBatches.length}
-                  />
-                  <div className="flex-1 overflow-hidden">
-                    {pageState.outreachSubTab === "contacts" ? (
-                      <ContactsList
-                        contacts={state.contacts}
-                        selectedContactId={pageState.selectedItemId}
-                        onSelectContact={(id) =>
-                          setPageState((s) => ({ ...s, selectedItemId: id }))
+            {/* Plan tab - full width */}
+            {pageState.activeTab === "plan" && (
+              <PlanView
+                plan={currentPlan}
+                tasks={state.tasks}
+                onTaskClick={(task) => setEditingTask(task)}
+                onTaskToggle={handleToggleTask}
+              />
+            )}
+
+            {/* Assets and Outreach tabs - list + detail layout */}
+            {pageState.activeTab !== "plan" && (
+              <>
+                {/* List Panel */}
+                <div className="w-2/5 min-w-[200px] overflow-hidden border-r border-edge-subtle bg-surface-subtle/30">
+                  {pageState.activeTab === "outreach" && (
+                    <div className="flex h-full flex-col">
+                      <OutreachSubTabs
+                        activeTab={pageState.outreachSubTab}
+                        onTabChange={(tab) =>
+                          setPageState((s) => ({
+                            ...s,
+                            outreachSubTab: tab,
+                            selectedItemId: null
+                          }))
                         }
-                        onAddContact={handleAddContact}
-                        onDeleteContact={handleDeleteContact}
+                        contactCount={state.contacts.length}
+                        batchCount={state.batches.length}
+                        pendingCount={pendingBatches.length}
+                      />
+                      <div className="flex-1 overflow-hidden">
+                        {pageState.outreachSubTab === "contacts" ? (
+                          <ContactsList
+                            contacts={state.contacts}
+                            selectedContactId={pageState.selectedItemId}
+                            onSelectContact={(id) =>
+                              setPageState((s) => ({ ...s, selectedItemId: id }))
+                            }
+                            onAddContact={handleAddContact}
+                            onDeleteContact={handleDeleteContact}
+                          />
+                        ) : (
+                          <BatchesList
+                            batches={state.batches}
+                            messages={state.messages}
+                            selectedBatchId={pageState.selectedItemId}
+                            onSelectBatch={(id) =>
+                              setPageState((s) => ({ ...s, selectedItemId: id }))
+                            }
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {pageState.activeTab === "assets" && (
+                    <AssetsList
+                      assets={state.assets}
+                      selectedAssetId={pageState.selectedItemId}
+                      onSelectAsset={(id) =>
+                        setPageState((s) => ({ ...s, selectedItemId: id }))
+                      }
+                    />
+                  )}
+                </div>
+
+                {/* Detail Panel */}
+                <div className="flex-1 overflow-hidden">
+                  {/* Outreach detail */}
+                  {pageState.activeTab === "outreach" && (
+                    pageState.outreachSubTab === "batches" ? (
+                      selectedBatch ? (
+                        <BatchDetail
+                          batch={selectedBatch}
+                          messages={state.messages}
+                          contacts={state.contacts}
+                          onApprove={handleApproveBatch}
+                          onReject={handleRejectBatch}
+                          onSend={handleSendBatch}
+                          onPreviewEmail={(message) => setPreviewingEmail(message)}
+                        />
+                      ) : (
+                        <EmptyDetailPanel
+                          icon={
+                            <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                            </svg>
+                          }
+                          title={state.batches.length === 0 ? "No email batches yet" : "Select a batch"}
+                          description={state.batches.length === 0
+                            ? "Ask the agent to prepare outreach emails"
+                            : "Choose a batch to review and approve"
+                          }
+                        />
+                      )
+                    ) : (
+                      pageState.selectedItemId ? (
+                        <ContactDetailView
+                          contact={state.contacts.find((c) => c.id === pageState.selectedItemId) || null}
+                          onEdit={() => {
+                            const contact = state.contacts.find((c) => c.id === pageState.selectedItemId);
+                            if (contact) setEditingContact(contact);
+                          }}
+                          onDelete={handleDeleteContact}
+                        />
+                      ) : (
+                        <EmptyDetailPanel
+                          icon={
+                            <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                            </svg>
+                          }
+                          title="Select a contact"
+                          description="Choose a contact to view details"
+                        />
+                      )
+                    )
+                  )}
+
+                  {/* Assets detail */}
+                  {pageState.activeTab === "assets" && (
+                    selectedAsset ? (
+                      <AssetDetail
+                        asset={selectedAsset}
+                        onSave={handleSaveAsset}
+                        onStatusChange={handleAssetStatusChange}
+                        onDelete={handleDeleteAsset}
                       />
                     ) : (
-                      <BatchesList
-                        batches={state.batches}
-                        messages={state.messages}
-                        selectedBatchId={pageState.selectedItemId}
-                        onSelectBatch={(id) =>
-                          setPageState((s) => ({ ...s, selectedItemId: id }))
+                      <EmptyDetailPanel
+                        icon={
+                          <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                        }
+                        title={state.assets.length === 0 ? "No assets yet" : "Select an asset"}
+                        description={state.assets.length === 0
+                          ? "Ask the agent to generate marketing content"
+                          : "Choose an asset to view and edit"
                         }
                       />
-                    )}
-                  </div>
+                    )
+                  )}
                 </div>
-              )}
-
-              {pageState.activeTab === "assets" && (
-                <AssetsList
-                  assets={state.assets}
-                  selectedAssetId={pageState.selectedItemId}
-                  onSelectAsset={(id) =>
-                    setPageState((s) => ({ ...s, selectedItemId: id }))
-                  }
-                />
-              )}
-
-              {pageState.activeTab === "plans" && (
-                <PlansList
-                  plans={state.plans}
-                  tasks={state.tasks}
-                  selectedPlanId={pageState.selectedItemId}
-                  onSelectPlan={(id) =>
-                    setPageState((s) => ({ ...s, selectedItemId: id }))
-                  }
-                />
-              )}
-            </div>
-
-            {/* Detail Panel */}
-            <div className="flex-1 overflow-hidden">
-              {/* Outreach detail */}
-              {pageState.activeTab === "outreach" && (
-                pageState.outreachSubTab === "batches" ? (
-                  selectedBatch ? (
-                    <BatchDetail
-                      batch={selectedBatch}
-                      messages={state.messages}
-                      contacts={state.contacts}
-                      onApprove={handleApproveBatch}
-                      onReject={handleRejectBatch}
-                      onSend={handleSendBatch}
-                      onPreviewEmail={(message) => setPreviewingEmail(message)}
-                    />
-                  ) : (
-                    <EmptyDetailPanel
-                      icon={
-                        <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                        </svg>
-                      }
-                      title={state.batches.length === 0 ? "No email batches yet" : "Select a batch"}
-                      description={state.batches.length === 0
-                        ? "Ask the agent to prepare outreach emails"
-                        : "Choose a batch to review and approve"
-                      }
-                    />
-                  )
-                ) : (
-                  pageState.selectedItemId ? (
-                    <ContactDetailView
-                      contact={state.contacts.find((c) => c.id === pageState.selectedItemId) || null}
-                      onEdit={() => {
-                        const contact = state.contacts.find((c) => c.id === pageState.selectedItemId);
-                        if (contact) setEditingContact(contact);
-                      }}
-                      onDelete={handleDeleteContact}
-                    />
-                  ) : (
-                    <EmptyDetailPanel
-                      icon={
-                        <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                        </svg>
-                      }
-                      title="Select a contact"
-                      description="Choose a contact to view details"
-                    />
-                  )
-                )
-              )}
-
-              {/* Assets detail */}
-              {pageState.activeTab === "assets" && (
-                selectedAsset ? (
-                  <AssetDetail
-                    asset={selectedAsset}
-                    onSave={handleSaveAsset}
-                    onStatusChange={handleAssetStatusChange}
-                    onDelete={handleDeleteAsset}
-                  />
-                ) : (
-                  <EmptyDetailPanel
-                    icon={
-                      <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                    }
-                    title={state.assets.length === 0 ? "No assets yet" : "Select an asset"}
-                    description={state.assets.length === 0
-                      ? "Ask the agent to generate marketing content"
-                      : "Choose an asset to view and edit"
-                    }
-                  />
-                )
-              )}
-
-              {/* Plans detail */}
-              {pageState.activeTab === "plans" && (
-                selectedPlan ? (
-                  <PlanDetail
-                    plan={selectedPlan}
-                    tasks={state.tasks}
-                    onTaskClick={(task) => setEditingTask(task)}
-                    onTaskToggle={handleToggleTask}
-                  />
-                ) : (
-                  <EmptyDetailPanel
-                    icon={
-                      <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                      </svg>
-                    }
-                    title={state.plans.length === 0 ? "No launch plan yet" : "Select a plan"}
-                    description={state.plans.length === 0
-                      ? "Ask the agent to create a 7-day launch plan"
-                      : "Choose a plan to view the task board"
-                    }
-                  />
-                )
-              )}
-            </div>
+              </>
+            )}
           </div>
         </div>
       </div>

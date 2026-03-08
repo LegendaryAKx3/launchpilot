@@ -16,19 +16,25 @@ export interface Asset {
 
 const assetTypeLabels: Record<string, string> = {
   landing_copy: "Landing Page",
-  email_copy: "Email Copy",
+  email_copy: "Email",
+  cold_email: "Cold Email",
+  cold_dm: "Cold DM",
   social_post: "Social Post",
   blog_post: "Blog Post",
   image_ad: "Image Ad",
+  image_ad_prompt: "Image Ad Prompt",
   video_script: "Video Script"
 };
 
 const assetTypeIcons: Record<string, string> = {
   landing_copy: "📄",
   email_copy: "✉️",
+  cold_email: "✉️",
+  cold_dm: "💬",
   social_post: "📱",
   blog_post: "📝",
   image_ad: "🖼️",
+  image_ad_prompt: "🖼️",
   video_script: "🎬"
 };
 
@@ -152,18 +158,43 @@ export function AssetsList({ assets, selectedAssetId, onSelectAsset }: AssetsLis
   );
 }
 
+// Fields to skip when generating preview text
+const skipPreviewFields = new Set([
+  "channel",
+  "variation_label",
+  "hook_angle",
+  "platform",
+  "reply_handling",
+  "visual_concept",
+  "target_emotion",
+  "headline_overlay",
+  "cta_overlay",
+  "music_mood",
+  "duration"
+]);
+
 function getPreviewText(content: Record<string, unknown>): string {
-  // Try to extract headline, subject, or first text field
-  const fields = ["headline", "subject", "title", "body", "text", "content"];
-  for (const field of fields) {
+  // Priority fields for different asset types
+  const priorityFields = [
+    "message",           // cold_dm
+    "subject",           // cold_email
+    "generation_prompt", // image_ad_prompt
+    "hook",              // video_script
+    "script",            // video_script
+    "headline",          // landing_copy
+    "body",              // email
+    "content"            // generic
+  ];
+
+  for (const field of priorityFields) {
     if (content[field] && typeof content[field] === "string") {
       return content[field] as string;
     }
   }
 
-  // Fallback to first string value
-  for (const value of Object.values(content)) {
-    if (typeof value === "string" && value.length > 0) {
+  // Fallback to first non-meta string value
+  for (const [key, value] of Object.entries(content)) {
+    if (!skipPreviewFields.has(key) && typeof value === "string" && value.length > 0) {
       return value;
     }
   }

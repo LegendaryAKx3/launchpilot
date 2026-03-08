@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.agents.execution_agent import (
     run_asset_generation_agent,
+    run_distribution_assets_agent,
     run_email_personalization_agent,
     run_execution_plan_agent,
     run_image_ad_prompt_agent,
@@ -25,6 +26,7 @@ from app.schemas.execution import (
     AssetUpdateRequest,
     ContactsUpsertRequest,
     ContactUpdateRequest,
+    DistributionAssetsRequest,
     EmailBatchPrepareRequest,
     ExecutionPlanRequest,
     ImageAdDraftRequest,
@@ -346,6 +348,95 @@ def advise_assets(
     db: Session = Depends(get_db),
 ):
     return generate_assets(project_id=project_id, payload=payload, _scope=_scope, db=db)
+
+
+@router.post("/distribution-assets")
+def generate_distribution_assets(
+    project_id: UUID,
+    payload: DistributionAssetsRequest,
+    _scope: CurrentUser = Depends(require_scope("execution:run")),
+    db: Session = Depends(get_db),
+):
+    """Generate multiple distribution asset variations across channels (DMs, emails, image ads, video scripts)."""
+    ProjectService(db).get_project_or_404(project_id)
+
+    context = build_project_context(db, project_id)
+    try:
+        output, trace = run_distribution_assets_agent(
+            context,
+            channels=payload.channels,
+            variations_per_channel=payload.variations_per_channel,
+            backboard=BackboardStageService(db),
+            project_id=str(project_id),
+            advice=payload.advice,
+            mode=payload.mode,
+        )
+    except BackboardRequestError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Backboard distribution assets failed: {exc}")
+
+    # Save each asset to the database
+    created_assets = []
+    for asset_data in output.get("assets", []):
+        asset_type = asset_data.get("asset_type", "")
+        # Map distribution types to storage types
+        storage_type = {
+            "cold_dm": "cold_dm",
+            "cold_email": "email_copy",
+            "image_ad_prompt": "image_ad",
+            "video_script": "video_script",
+        }.get(asset_type, asset_type)
+
+        asset = Asset(
+            project_id=project_id,
+            asset_type=storage_type,
+            title=asset_data.get("title") or f"{asset_type} variation",
+            content={
+                "channel": asset_data.get("channel", ""),
+                "variation_label": asset_data.get("variation_label", "A"),
+                "hook_angle": asset_data.get("hook_angle", ""),
+                **asset_data.get("content", {}),
+            },
+            storage_path=None,
+            created_by_agent="execution_agent",
+            status="draft",
+        )
+        db.add(asset)
+        db.flush()
+        created_assets.append({
+            "id": str(asset.id),
+            "asset_type": storage_type,
+            "title": asset.title,
+            "status": asset.status,
+            "content": asset.content,
+        })
+
+    AuditService(db).log(
+        project_id,
+        "agent",
+        "execution_agent",
+        "execution.distribution_assets_generated",
+        "asset",
+        None,
+        metadata={"agent_trace": trace, "mode": payload.mode, "advice": payload.advice, "count": len(created_assets)},
+    )
+    db.commit()
+    BackboardProjectStateService(db).sync_after_action(
+        project_id=str(project_id),
+        reason="execution.distribution_assets",
+        stage="execution",
+        extra={"mode": payload.mode, "used_advice": bool(payload.advice), "asset_count": len(created_assets)},
+    )
+    return success(
+        {
+            "recommended_channels": output.get("recommended_channels", []),
+            "channel_reasoning": output.get("channel_reasoning", ""),
+            "assets": created_assets,
+            "testing_strategy": output.get("testing_strategy", ""),
+            "chat_message": output.get("chat_message", ""),
+            "next_step_suggestion": output.get("next_step_suggestion", ""),
+            "agent_trace": trace,
+        }
+    )
 
 
 @router.post("/image-ad/draft")

@@ -70,3 +70,10 @@ class ContactUpdateRequest(BaseModel):
     segment: str | None = None
     company: str | None = None
     personalization_notes: str | None = None
+
+
+class DistributionAssetsRequest(BaseModel):
+    channels: list[str] | None = None  # cold_dm, cold_email, image_ad_prompt, video_script
+    variations_per_channel: int = 3
+    advice: str | None = None
+    mode: Literal["baseline", "deepen", "retry", "extend"] = "baseline"

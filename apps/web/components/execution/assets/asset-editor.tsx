@@ -17,11 +17,20 @@ const assetTypeFields: Record<string, { key: string; label: string; type: "input
     { key: "subject", label: "Subject Line", type: "input" },
     { key: "preview_text", label: "Preview Text", type: "input" },
     { key: "body", label: "Email Body", type: "textarea", rows: 10 },
-    { key: "cta_text", label: "Call to Action", type: "input" },
-    { key: "signature", label: "Signature", type: "textarea", rows: 3 }
+    { key: "cta_text", label: "Call to Action", type: "input" }
+  ],
+  cold_email: [
+    { key: "subject", label: "Subject Line", type: "input" },
+    { key: "preview_text", label: "Preview Text", type: "input" },
+    { key: "body", label: "Email Body", type: "textarea", rows: 8 },
+    { key: "cta", label: "Call to Action", type: "input" },
+    { key: "follow_up", label: "Follow-up Message", type: "textarea", rows: 4 }
+  ],
+  cold_dm: [
+    { key: "message", label: "DM Message", type: "textarea", rows: 4 },
+    { key: "follow_up", label: "Follow-up Message", type: "textarea", rows: 3 }
   ],
   social_post: [
-    { key: "platform", label: "Platform", type: "input" },
     { key: "content", label: "Post Content", type: "textarea", rows: 4 },
     { key: "hashtags", label: "Hashtags", type: "input" },
     { key: "cta", label: "Call to Action", type: "input" }
@@ -34,15 +43,35 @@ const assetTypeFields: Record<string, { key: string; label: string; type: "input
     { key: "conclusion", label: "Conclusion", type: "textarea", rows: 4 }
   ],
   image_ad: [
-    { key: "generation_prompt", label: "Comprehensive Image Generation Prompt", type: "textarea", rows: 12 }
+    { key: "generation_prompt", label: "Image Generation Prompt", type: "textarea", rows: 12 }
+  ],
+  image_ad_prompt: [
+    { key: "generation_prompt", label: "Image Generation Prompt", type: "textarea", rows: 12 }
   ],
   video_script: [
-    { key: "title", label: "Title", type: "input" },
     { key: "hook", label: "Opening Hook", type: "textarea", rows: 3 },
     { key: "script", label: "Script", type: "textarea", rows: 12 },
     { key: "cta", label: "Call to Action", type: "textarea", rows: 2 }
   ]
 };
+
+// Fields to hide from editor (meta/internal fields)
+const hiddenFields = new Set([
+  "channel",
+  "variation_label",
+  "hook_angle",
+  "platform",
+  "reply_handling",
+  "follow_up_1",
+  "follow_up_2",
+  "visual_concept",
+  "target_emotion",
+  "headline_overlay",
+  "cta_overlay",
+  "text_overlays",
+  "music_mood",
+  "duration"
+]);
 
 // Default fields for unknown asset types
 const defaultFields = [
@@ -96,9 +125,12 @@ export function AssetEditor({ assetType, content, onSave, saving }: AssetEditorP
     [formData, onSave]
   );
 
-  // Detect any extra fields in content that aren't in the field config
+  // Detect any extra fields in content that aren't in the field config (excluding hidden fields)
   const extraFields = Object.entries(content).filter(
-    ([key, value]) => !fields.some((f) => f.key === key) && typeof value === "string"
+    ([key, value]) =>
+      !fields.some((f) => f.key === key) &&
+      !hiddenFields.has(key) &&
+      typeof value === "string"
   );
 
   return (

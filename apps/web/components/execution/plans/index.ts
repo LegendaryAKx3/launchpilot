@@ -1,3 +1,2 @@
-export { PlansList, type Plan, type Task } from "./plans-list";
-export { PlanDetail } from "./plan-detail";
+export { PlanView, type Plan, type Task } from "./plan-view";
 export { TaskDrawer } from "./task-drawer";

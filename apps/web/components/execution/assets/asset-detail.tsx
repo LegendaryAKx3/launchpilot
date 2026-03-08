@@ -10,9 +10,12 @@ import { AssetEditor } from "./asset-editor";
 const assetTypeLabels: Record<string, string> = {
   landing_copy: "Landing Page Copy",
   email_copy: "Email Copy",
+  cold_email: "Cold Email",
+  cold_dm: "Cold DM",
   social_post: "Social Post",
   blog_post: "Blog Post",
   image_ad: "Image Ad",
+  image_ad_prompt: "Image Ad Prompt",
   video_script: "Video Script"
 };
 
@@ -177,10 +180,46 @@ export function AssetDetail({ asset, onSave, onStatusChange, onDelete }: AssetDe
   );
 }
 
+// Fields to hide from preview (meta/internal fields that clutter the UI)
+const hiddenFields = new Set([
+  "channel",
+  "variation_label",
+  "hook_angle",
+  "platform",
+  "reply_handling",
+  "follow_up_1",
+  "follow_up_2",
+  "visual_concept",
+  "target_emotion",
+  "headline_overlay",
+  "cta_overlay",
+  "text_overlays",
+  "music_mood",
+  "duration"
+]);
+
+// Friendly labels for common fields
+const fieldLabels: Record<string, string> = {
+  message: "Message",
+  follow_up: "Follow-up",
+  subject: "Subject Line",
+  preview_text: "Preview",
+  body: "Body",
+  cta: "Call to Action",
+  generation_prompt: "Image Prompt",
+  hook: "Opening Hook",
+  script: "Script"
+};
+
 function AssetPreview({ asset }: { asset: Asset }) {
   const content = asset.content || {};
 
-  if (Object.keys(content).length === 0) {
+  // Filter out hidden fields
+  const visibleEntries = Object.entries(content).filter(
+    ([key]) => !hiddenFields.has(key)
+  );
+
+  if (visibleEntries.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-center">
         <div>
@@ -195,10 +234,10 @@ function AssetPreview({ asset }: { asset: Asset }) {
 
   return (
     <div className="space-y-6">
-      {Object.entries(content).map(([key, value]) => (
+      {visibleEntries.map(([key, value]) => (
         <div key={key} className="space-y-2">
           <label className="block text-sm font-medium capitalize text-fg-secondary">
-            {key.replace(/_/g, " ")}
+            {fieldLabels[key] || key.replace(/_/g, " ")}
           </label>
           <div
             className={cn(

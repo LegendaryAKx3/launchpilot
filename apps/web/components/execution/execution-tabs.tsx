@@ -2,13 +2,13 @@
 
 import { cn } from "@/lib/utils";
 
-export type ExecutionTab = "plans" | "assets" | "outreach";
+export type ExecutionTab = "plan" | "assets" | "outreach";
 
 interface ExecutionTabsProps {
   activeTab: ExecutionTab;
   onTabChange: (tab: ExecutionTab) => void;
   counts?: {
-    plans?: number;
+    hasPlan?: boolean;
     assets?: number;
     contacts?: number;
     pendingBatches?: number;
@@ -17,15 +17,15 @@ interface ExecutionTabsProps {
 
 const tabs: { id: ExecutionTab; label: string; icon: React.ReactNode }[] = [
   {
-    id: "outreach",
-    label: "Outreach",
+    id: "plan",
+    label: "Plan",
     icon: (
       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path
           strokeLinecap="round"
           strokeLinejoin="round"
           strokeWidth={2}
-          d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+          d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
         />
       </svg>
     )
@@ -45,15 +45,15 @@ const tabs: { id: ExecutionTab; label: string; icon: React.ReactNode }[] = [
     )
   },
   {
-    id: "plans",
-    label: "Plans",
+    id: "outreach",
+    label: "Outreach",
     icon: (
       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path
           strokeLinecap="round"
           strokeLinejoin="round"
           strokeWidth={2}
-          d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+          d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
         />
       </svg>
     )
@@ -61,25 +61,41 @@ const tabs: { id: ExecutionTab; label: string; icon: React.ReactNode }[] = [
 ];
 
 export function ExecutionTabs({ activeTab, onTabChange, counts }: ExecutionTabsProps) {
-  const getCount = (tabId: ExecutionTab) => {
-    switch (tabId) {
-      case "plans":
-        return counts?.plans;
-      case "assets":
-        return counts?.assets;
-      case "outreach":
-        return counts?.contacts;
-      default:
-        return undefined;
-    }
-  };
-
   return (
     <div className="flex items-center gap-1 rounded-lg bg-surface-subtle p-1">
       {tabs.map((tab) => {
-        const count = getCount(tab.id);
         const isActive = activeTab === tab.id;
         const hasPending = tab.id === "outreach" && (counts?.pendingBatches ?? 0) > 0;
+
+        // Show count for assets and outreach, checkmark for plan
+        let badge = null;
+        if (tab.id === "plan" && counts?.hasPlan) {
+          badge = (
+            <span className="flex items-center justify-center">
+              <svg className="h-3.5 w-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </span>
+          );
+        } else if (tab.id === "assets" && counts?.assets && counts.assets > 0) {
+          badge = (
+            <span className={cn(
+              "flex items-center justify-center rounded-full px-1.5 py-0.5 text-xs",
+              isActive ? "bg-accent/10 text-accent" : "bg-surface-elevated text-fg-faint"
+            )}>
+              {counts.assets}
+            </span>
+          );
+        } else if (tab.id === "outreach" && counts?.contacts && counts.contacts > 0) {
+          badge = (
+            <span className={cn(
+              "flex items-center justify-center rounded-full px-1.5 py-0.5 text-xs",
+              isActive ? "bg-accent/10 text-accent" : "bg-surface-elevated text-fg-faint"
+            )}>
+              {counts.contacts}
+            </span>
+          );
+        }
 
         return (
           <button
@@ -94,18 +110,7 @@ export function ExecutionTabs({ activeTab, onTabChange, counts }: ExecutionTabsP
           >
             <span className={cn(isActive && "text-accent")}>{tab.icon}</span>
             <span>{tab.label}</span>
-            {count !== undefined && count > 0 && (
-              <span
-                className={cn(
-                  "rounded-full px-1.5 py-0.5 text-xs",
-                  isActive
-                    ? "bg-accent/10 text-accent"
-                    : "bg-surface-elevated text-fg-faint"
-                )}
-              >
-                {count}
-              </span>
-            )}
+            {badge}
             {hasPending && (
               <span className="absolute -right-1 -top-1 flex h-2.5 w-2.5">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />

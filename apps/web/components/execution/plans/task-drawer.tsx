@@ -10,7 +10,7 @@ import {
   DrawerSelect,
   DrawerTextarea
 } from "@/components/ui/detail-drawer";
-import { Task } from "./plans-list";
+import { Task } from "./plan-view";
 
 interface TaskDrawerProps {
   task: Task | null;
