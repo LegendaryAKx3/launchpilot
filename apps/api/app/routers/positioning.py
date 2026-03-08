@@ -8,6 +8,7 @@ from app.agents.positioning_agent import run_positioning_agent
 from app.agents.shared_context import build_project_context
 from app.db.session import get_db
 from app.integrations.backboard_client import BackboardRequestError
+from app.models.chat import AgentChatMessage
 from app.models.positioning import PositioningVersion
 from app.routers.utils import success
 from app.schemas.positioning import PositioningRunRequest
@@ -58,6 +59,20 @@ def run_positioning(
     )
     db.add(version)
     db.flush()
+    if output.get("chat_message"):
+        db.add(
+            AgentChatMessage(
+                project_id=str(project_id),
+                agent_type="positioning",
+                role="assistant",
+                content=str(output.get("chat_message") or ""),
+                message_metadata={
+                    "source": "agent_run",
+                    "mode": payload.mode,
+                    "next_step_suggestion": output.get("next_step_suggestion"),
+                },
+            )
+        )
 
     project.stage = "positioning"
     AuditService(db).log(

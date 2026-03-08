@@ -24,12 +24,14 @@ export function ContactDrawer({ contact, isOpen, onClose, onSave, onDelete }: Co
   const [email, setEmail] = useState("");
   const [segment, setSegment] = useState("manual");
   const [saving, setSaving] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     if (contact) {
       setName(contact.name || "");
       setEmail(contact.email || "");
       setSegment(contact.segment || "manual");
+      setShowDeleteConfirm(false);
     }
   }, [contact]);
 
@@ -51,14 +53,12 @@ export function ContactDrawer({ contact, isOpen, onClose, onSave, onDelete }: Co
 
   const handleDelete = useCallback(async () => {
     if (!contact) return;
-    if (window.confirm("Are you sure you want to delete this contact?")) {
-      setSaving(true);
-      try {
-        await onDelete(contact.id);
-        onClose();
-      } finally {
-        setSaving(false);
-      }
+    setSaving(true);
+    try {
+      await onDelete(contact.id);
+      onClose();
+    } finally {
+      setSaving(false);
     }
   }, [contact, onDelete, onClose]);
 
@@ -70,9 +70,28 @@ export function ContactDrawer({ contact, isOpen, onClose, onSave, onDelete }: Co
       subtitle={contact?.email}
       footer={
         <div className="flex items-center justify-between">
-          <DrawerButton variant="destructive" onClick={handleDelete} loading={saving}>
-            Delete Contact
-          </DrawerButton>
+          {showDeleteConfirm ? (
+            <div className="w-full rounded-lg border border-red-500/30 bg-red-500/5 p-4">
+              <p className="text-sm font-medium text-red-400">
+                Delete "{contact?.name || contact?.email}"?
+              </p>
+              <p className="mt-1 text-sm text-fg-muted">
+                This action cannot be undone. The contact and its outreach references will be removed.
+              </p>
+              <div className="mt-4 flex gap-2">
+                <DrawerButton variant="destructive" onClick={handleDelete} loading={saving}>
+                  {saving ? "Deleting..." : "Yes, delete contact"}
+                </DrawerButton>
+                <DrawerButton variant="secondary" onClick={() => setShowDeleteConfirm(false)} disabled={saving}>
+                  Cancel
+                </DrawerButton>
+              </div>
+            </div>
+          ) : (
+            <DrawerButton variant="destructive" onClick={() => setShowDeleteConfirm(true)} disabled={saving}>
+              Delete Contact
+            </DrawerButton>
+          )}
           <div className="flex items-center gap-2">
             <DrawerButton variant="secondary" onClick={onClose}>
               Cancel
