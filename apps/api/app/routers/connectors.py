@@ -38,7 +38,13 @@ def github_link_url(
     settings = get_settings()
     app_url = settings.web_app_url.rstrip("/")
     # This uses the existing Auth0 route handler in the web app.
-    link_url = f"{app_url}/auth/login?connection=github&returnTo={quote('/app/settings/security', safe='')}"
+    return_to = quote("/app/settings/security", safe="")
+    github_scope = quote("repo,user:email", safe="")
+    link_url = (
+        f"{app_url}/auth/login?connection=github"
+        f"&connection_scope={github_scope}"
+        f"&returnTo={return_to}"
+    )
     return success({"url": link_url})
 
 
@@ -69,6 +75,87 @@ def google_link_url(
         f"&returnTo={return_to}"
     )
     return success({"url": link_url})
+
+
+@router.get("/connectors/debug")
+def connectors_debug(
+    current_user: CurrentUser = Depends(get_current_user),
+    _scope: CurrentUser = Depends(require_scope("connector:link")),
+):
+    github = Auth0GithubConnector()
+    google = Auth0GoogleConnector()
+
+    github_profile = github._user_profile(current_user.sub) or {}
+    google_profile = google._user_profile(current_user.sub) or {}
+
+    def summarize_identities(profile: dict) -> list[dict]:
+        out: list[dict] = []
+        for identity in profile.get("identities", []) if isinstance(profile.get("identities"), list) else []:
+            if not isinstance(identity, dict):
+                continue
+            provider = str(identity.get("provider", "")).lower()
+            if provider not in {"github", "google-oauth2"}:
+                continue
+            out.append(
+                {
+                    "provider": provider,
+                    "provider_user_id": identity.get("user_id"),
+                    "has_access_token": bool(identity.get("access_token")),
+                }
+            )
+        return out
+
+    email = str(github_profile.get("email") or google_profile.get("email") or "").strip().lower()
+    github_candidates = github._users_by_email(email) if email else []
+    google_candidates = google._users_by_email(email) if email else []
+
+    def summarize_candidates(candidates: list[dict], connector, provider: str) -> list[dict]:
+        rows: list[dict] = []
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            user_id = str(candidate.get("user_id", "")).strip()
+            if not user_id:
+                continue
+            profile = connector._user_profile(user_id) or {}
+            identities = summarize_identities(profile)
+            provider_identity = next((i for i in identities if i.get("provider") == provider), None)
+            rows.append(
+                {
+                    "user_id": user_id,
+                    "email": profile.get("email"),
+                    "email_verified": bool(profile.get("email_verified")),
+                    "provider_present": provider_identity is not None,
+                    "provider_has_access_token": bool(provider_identity and provider_identity.get("has_access_token")),
+                }
+            )
+        return rows
+
+    payload = {
+        "current_user": {
+            "sub": current_user.sub,
+            "email": current_user.email,
+        },
+        "management": {
+            "github_management_token_available": bool(github._management_token()),
+            "google_management_token_available": bool(google._management_token()),
+        },
+        "current_profile": {
+            "email": github_profile.get("email") or google_profile.get("email"),
+            "email_verified": bool(github_profile.get("email_verified") or google_profile.get("email_verified")),
+            "identities": summarize_identities(github_profile or google_profile),
+        },
+        "resolved_status": {
+            "github": github.github_status(current_user.sub),
+            "google": google.google_status(current_user.sub),
+        },
+        "candidates_by_email": {
+            "email": email or None,
+            "github_candidates": summarize_candidates(github_candidates, github, "github"),
+            "google_candidates": summarize_candidates(google_candidates, google, "google-oauth2"),
+        },
+    }
+    return success(payload)
 
 
 @router.get("/projects/{project_id}/github/repos")

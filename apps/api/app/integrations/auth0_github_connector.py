@@ -55,7 +55,7 @@ class Auth0GithubConnector:
             return None
 
         encoded_sub = quote(user_sub, safe="")
-        fields = "identities,user_id,email,name"
+        fields = "identities,user_id,email,name,email_verified"
         with httpx.Client(timeout=15.0) as client:
             response = client.get(
                 f"https://{self.domain}/api/v2/users/{encoded_sub}",
@@ -66,17 +66,70 @@ class Auth0GithubConnector:
                 return None
             return response.json()
 
+    def _users_by_email(self, email: str) -> list[dict]:
+        token = self._management_token()
+        if not token or not self.domain:
+            return []
+
+        with httpx.Client(timeout=15.0) as client:
+            response = client.get(
+                f"https://{self.domain}/api/v2/users-by-email",
+                params={
+                    "email": email,
+                    "fields": "identities,user_id,email,email_verified",
+                    "include_fields": "true",
+                },
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if not response.is_success:
+                return []
+            body = response.json()
+            return body if isinstance(body, list) else []
+
     def github_identity(self, user_sub: str) -> dict | None:
         profile = self._user_profile(user_sub)
         if not profile:
             return None
 
         identities = profile.get("identities", [])
+        local_fallback_identity: dict | None = None
         for identity in identities:
             provider = str(identity.get("provider", "")).lower()
-            if provider == "github":
+            if provider != "github":
+                continue
+            if identity.get("access_token"):
                 return identity
-        return None
+            if local_fallback_identity is None:
+                local_fallback_identity = identity
+
+        # Fallback for split Auth0 users (same verified email, different providers).
+        email = str(profile.get("email", "")).strip().lower()
+        email_verified = bool(profile.get("email_verified"))
+        if not email or not email_verified:
+            return None
+
+        fallback_identity: dict | None = None
+        for candidate in self._users_by_email(email):
+            candidate_sub = str(candidate.get("user_id", "")).strip()
+            if not candidate_sub:
+                continue
+            candidate_profile = self._user_profile(candidate_sub)
+            if not candidate_profile:
+                continue
+            candidate_email = str(candidate_profile.get("email", "")).strip().lower()
+            if candidate_email != email or not bool(candidate_profile.get("email_verified")):
+                continue
+            for identity in candidate_profile.get("identities", []):
+                provider = str(identity.get("provider", "")).lower()
+                if provider != "github":
+                    continue
+                if identity.get("access_token"):
+                    return identity
+                if fallback_identity is None:
+                    fallback_identity = identity
+        if fallback_identity is not None:
+            return fallback_identity
+        return local_fallback_identity
 
     def github_status(self, user_sub: str) -> dict:
         identity = self.github_identity(user_sub)

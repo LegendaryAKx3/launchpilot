@@ -25,6 +25,10 @@ interface GoogleLinkPayload {
   url: string;
 }
 
+const githubFallbackLink = "/auth/login?connection=github&connection_scope=repo%2Cuser%3Aemail&returnTo=%2Fapp%2Fsettings%2Fsecurity";
+const googleFallbackLink =
+  "/auth/login?connection=google-oauth2&connection_scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive.file&prompt=consent&access_type=offline&returnTo=%2Fapp%2Fsettings%2Fsecurity";
+
 export default async function SecurityCenterPage() {
   const githubStatus = await serverApiFetch<GitHubStatusPayload>("/connectors/github/status");
   const githubLink = await serverApiFetch<GitHubLinkPayload>("/connectors/github/link-url");
@@ -146,7 +150,7 @@ export default async function SecurityCenterPage() {
             </p>
             <div className="mt-3">
               <Link
-                href={githubLink?.url ?? "/auth/login?connection=github"}
+                href={githubLink?.url ?? githubFallbackLink}
                 className="inline-flex items-center rounded-md bg-accent px-3 py-2 text-xs font-medium text-white"
               >
                 {githubStatus?.linked ? "Reconnect GitHub" : "Connect GitHub"}
@@ -163,7 +167,7 @@ export default async function SecurityCenterPage() {
             </p>
             <div className="mt-3">
               <Link
-                href={googleLink?.url ?? "/auth/login?connection=google-oauth2"}
+                href={googleLink?.url ?? googleFallbackLink}
                 className="inline-flex items-center rounded-md bg-accent px-3 py-2 text-xs font-medium text-white"
               >
                 {googleStatus?.linked ? "Reconnect Google" : "Connect Google"}
