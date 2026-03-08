@@ -10,6 +10,9 @@ class BackboardRequestError(RuntimeError):
     pass
 
 
+TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
+
+
 @dataclass(slots=True)
 class BackboardClient:
     api_key: str
@@ -94,12 +97,16 @@ class BackboardClient:
         for attempt in range(self.retries + 1):
             try:
                 with httpx.Client(timeout=request_timeout) as client:
-                    return client.request(
+                    response = client.request(
                         method=method,
                         url=self._url(path),
                         headers=self._headers(),
                         **kwargs,
                     )
+                    if response.status_code in TRANSIENT_STATUS_CODES and attempt < self.retries:
+                        time.sleep(0.4 * (attempt + 1))
+                        continue
+                    return response
             except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
                 last_exc = exc
                 if attempt < self.retries:

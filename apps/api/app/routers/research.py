@@ -1018,13 +1018,10 @@ def run_research(
             )
             github_repo_context["backboard_memory_sync"] = {"status": "ok", **repo_memory_sync}
         except BackboardRequestError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail={
-                    "code": "BACKBOARD_REPO_MEMORY_SYNC_FAILED",
-                    "message": f"Failed to persist repository summary into Backboard memory: {exc}",
-                },
-            ) from exc
+            github_repo_context["backboard_memory_sync"] = {
+                "status": "error",
+                "error": str(exc),
+            }
 
     if payload.pinned_wedge_ids:
         context["pinned_wedge_ids"] = [str(item) for item in payload.pinned_wedge_ids]

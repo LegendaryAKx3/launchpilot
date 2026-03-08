@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -24,11 +26,7 @@ Store factual project updates, pipeline progress, decisions, artifacts, approval
 Use the memory attached to this assistant as the canonical running state history for this project.
 """.strip()
 
-STAGE_ASSISTANT_KEYS = (
-    "backboard_research_assistant",
-    "backboard_positioning_assistant",
-    "backboard_execution_assistant",
-)
+LOGGER = logging.getLogger(__name__)
 
 
 class BackboardProjectStateService:
@@ -73,26 +71,110 @@ class BackboardProjectStateService:
                 snapshot=snapshot,
                 extra=extra or {},
             )
+            content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            last_hash = get_project_memory_value(self.db, project_id, "backboard_project_state_last_hash", {})
+            if isinstance(last_hash, dict) and last_hash.get("hash") == content_hash:
+                result = {
+                    "status": "skipped",
+                    "reason": reason,
+                    "stage": stage,
+                    "skip_reason": "unchanged_payload",
+                    "synced_at": datetime.utcnow().isoformat() + "Z",
+                }
+                upsert_project_memory(
+                    self.db,
+                    project_id,
+                    "backboard_project_state_last_sync",
+                    result,
+                    "integration_ref",
+                    "backboard",
+                )
+                self.db.commit()
+                return result
 
             synced: list[dict[str, Any]] = []
+            errors: list[dict[str, Any]] = []
             for assistant_ref in assistant_ids:
-                raw = self.client.add_memory(assistant_ref["assistant_id"], content)
-                synced.append(
-                    {
-                        "scope": assistant_ref["scope"],
-                        "assistant_id": assistant_ref["assistant_id"],
-                        "memory_id": self._extract_value(raw, ("memory_id", "id")),
-                        "memory_operation_id": self._extract_value(raw, ("memory_operation_id", "operation_id")),
-                    }
-                )
+                try:
+                    raw = self.client.add_memory(assistant_ref["assistant_id"], content)
+                    synced.append(
+                        {
+                            "scope": assistant_ref["scope"],
+                            "assistant_id": assistant_ref["assistant_id"],
+                            "memory_id": self._extract_value(raw, ("memory_id", "id")),
+                            "memory_operation_id": self._extract_value(raw, ("memory_operation_id", "operation_id")),
+                        }
+                    )
+                except BackboardRequestError as exc:
+                    recovered = False
+                    if assistant_ref["scope"] == "project_state" and self._is_recoverable_memory_error(exc):
+                        LOGGER.warning(
+                            "backboard.project_state_memory_failed rotating assistant project_id=%s assistant_id=%s error=%s",
+                            project_id,
+                            assistant_ref["assistant_id"],
+                            exc,
+                        )
+                        replacement_id = self._rotate_project_state_assistant(project_id)
+                        try:
+                            raw = self.client.add_memory(replacement_id, content)
+                            LOGGER.info(
+                                "backboard.project_state_memory_recovered project_id=%s previous_assistant_id=%s replacement_assistant_id=%s",
+                                project_id,
+                                assistant_ref["assistant_id"],
+                                replacement_id,
+                            )
+                            synced.append(
+                                {
+                                    "scope": assistant_ref["scope"],
+                                    "assistant_id": replacement_id,
+                                    "memory_id": self._extract_value(raw, ("memory_id", "id")),
+                                    "memory_operation_id": self._extract_value(raw, ("memory_operation_id", "operation_id")),
+                                    "rotated_from": assistant_ref["assistant_id"],
+                                }
+                            )
+                            recovered = True
+                        except BackboardRequestError as retry_exc:
+                            LOGGER.warning(
+                                "backboard.project_state_memory_retry_failed project_id=%s replacement_assistant_id=%s error=%s",
+                                project_id,
+                                replacement_id,
+                                retry_exc,
+                            )
+                            errors.append(
+                                {
+                                    "scope": assistant_ref["scope"],
+                                    "assistant_id": replacement_id,
+                                    "error": str(retry_exc),
+                                    "rotated_from": assistant_ref["assistant_id"],
+                                }
+                            )
+                    if recovered:
+                        continue
+                    errors.append(
+                        {
+                            "scope": assistant_ref["scope"],
+                            "assistant_id": assistant_ref["assistant_id"],
+                            "error": str(exc),
+                        }
+                    )
 
             result = {
-                "status": "ok",
+                "status": "ok" if synced else "error",
                 "reason": reason,
                 "stage": stage,
                 "synced_assistants": synced,
+                "errors": errors,
                 "synced_at": datetime.utcnow().isoformat() + "Z",
             }
+            if synced:
+                upsert_project_memory(
+                    self.db,
+                    project_id,
+                    "backboard_project_state_last_hash",
+                    {"hash": content_hash, "synced_at": result["synced_at"]},
+                    "integration_ref",
+                    "backboard",
+                )
         except BackboardRequestError as exc:
             result = {
                 "status": "error",
@@ -137,12 +219,6 @@ class BackboardProjectStateService:
 
         refs.append({"scope": "project_state", "assistant_id": state_assistant_id})
 
-        for key in STAGE_ASSISTANT_KEYS:
-            assistant_mem = get_project_memory_value(self.db, project_id, key, {})
-            assistant_id = assistant_mem.get("assistant_id")
-            if assistant_id:
-                refs.append({"scope": key.replace("backboard_", "").replace("_assistant", ""), "assistant_id": assistant_id})
-
         return refs
 
     def _build_memory_content(
@@ -161,16 +237,101 @@ class BackboardProjectStateService:
             "stage": stage,
             "synced_at": datetime.utcnow().isoformat() + "Z",
             "extra": extra,
-            "snapshot": snapshot,
+            "snapshot": self._compact_snapshot_for_memory(snapshot),
         }
         serialized = json.dumps(payload, ensure_ascii=True)
-        if len(serialized) > 18000:
-            payload["snapshot"]["recent_activity"] = payload["snapshot"]["recent_activity"][:20]
+        if len(serialized) > 12000:
+            payload["snapshot"]["recent_activity"] = payload["snapshot"]["recent_activity"][:8]
             payload["snapshot"]["chat"] = {
-                key: value[:10] for key, value in (payload["snapshot"].get("chat") or {}).items()
+                key: value[:2] for key, value in (payload["snapshot"].get("chat") or {}).items()
+            }
+            serialized = json.dumps(payload, ensure_ascii=True)
+        if len(serialized) > 8000:
+            payload["snapshot"] = {
+                "project": payload["snapshot"].get("project"),
+                "counts": payload["snapshot"].get("counts"),
+                "recent_activity": payload["snapshot"].get("recent_activity", [])[:4],
             }
             serialized = json.dumps(payload, ensure_ascii=True)
         return serialized
+
+    def _compact_snapshot_for_memory(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        project = snapshot.get("project") or {}
+        brief = snapshot.get("brief") or {}
+        research = snapshot.get("research") or {}
+        positioning = snapshot.get("positioning") or {}
+        execution = snapshot.get("execution") or {}
+        approvals = snapshot.get("approvals") or []
+        recent_activity = snapshot.get("recent_activity") or []
+        chat = snapshot.get("chat") or {}
+
+        def _trim(text: Any, limit: int = 280) -> str | None:
+            if text is None:
+                return None
+            value = str(text).strip()
+            if not value:
+                return None
+            return value[:limit]
+
+        compact_chat: dict[str, list[dict[str, Any]]] = {}
+        for agent, messages in chat.items():
+            if not isinstance(messages, list):
+                continue
+            compact_chat[str(agent)] = [
+                {
+                    "role": item.get("role"),
+                    "content": _trim(item.get("content"), 220),
+                    "created_at": item.get("created_at"),
+                }
+                for item in messages[-3:]
+                if isinstance(item, dict)
+            ]
+
+        return {
+            "project": {
+                "id": project.get("id"),
+                "name": _trim(project.get("name"), 120),
+                "goal": _trim(project.get("goal"), 220),
+                "stage": project.get("stage"),
+                "status": project.get("status"),
+            },
+            "brief": {
+                "problem": _trim(brief.get("problem"), 220),
+                "audience": _trim(brief.get("audience"), 220),
+                "constraints": _trim(brief.get("constraints"), 220),
+            },
+            "counts": {
+                "sources": len(snapshot.get("sources") or []),
+                "project_memory": len(snapshot.get("project_memory") or []),
+                "competitors": len(research.get("competitors") or []),
+                "pain_point_clusters": len(research.get("pain_point_clusters") or []),
+                "opportunity_wedges": len(research.get("opportunity_wedges") or []),
+                "positioning_versions": len(positioning.get("versions") or []),
+                "plans": len(execution.get("plans") or []),
+                "tasks": len(execution.get("tasks") or []),
+                "assets": len(execution.get("assets") or []),
+                "contacts": len(execution.get("contacts") or []),
+                "batches": len(execution.get("batches") or []),
+                "outbound_messages": len(execution.get("outbound_messages") or []),
+                "approvals": len(approvals),
+            },
+            "research_highlights": [
+                _trim(item.get("label"), 140)
+                for item in (research.get("opportunity_wedges") or [])[:5]
+                if isinstance(item, dict) and item.get("label")
+            ],
+            "recent_activity": [
+                {
+                    "verb": item.get("verb"),
+                    "object_type": item.get("object_type"),
+                    "object_id": item.get("object_id"),
+                    "created_at": item.get("created_at"),
+                }
+                for item in recent_activity[:12]
+                if isinstance(item, dict)
+            ],
+            "chat": compact_chat,
+        }
 
     def _build_project_state_snapshot(self, project_id: str) -> dict[str, Any]:
         project = self.db.query(Project).filter(Project.id == project_id).first()
@@ -461,3 +622,29 @@ class BackboardProjectStateService:
             if isinstance(value, str) and value:
                 return value
         return None
+
+    def _is_recoverable_memory_error(self, exc: BackboardRequestError) -> bool:
+        text = str(exc).lower()
+        return any(code in text for code in ("(429)", "(500)", "(502)", "(503)", "(504)"))
+
+    def _rotate_project_state_assistant(self, project_id: str) -> str:
+        project = self.db.query(Project).filter(Project.id == project_id).first()
+        project_name = project.name if project and project.name else "project"
+        previous = get_project_memory_value(self.db, project_id, "backboard_project_state_assistant", {}).get("assistant_id")
+        assistant_id = self.client.create_assistant(
+            name=f"{project_name}-project-state",
+            system_prompt=PROJECT_STATE_PROMPT,
+        )
+        upsert_project_memory(
+            self.db,
+            project_id,
+            "backboard_project_state_assistant",
+            {
+                "assistant_id": assistant_id,
+                "rotated_from": previous,
+                "rotated_at": datetime.utcnow().isoformat() + "Z",
+            },
+            "integration_ref",
+            "backboard",
+        )
+        return assistant_id
