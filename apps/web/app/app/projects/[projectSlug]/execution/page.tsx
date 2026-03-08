@@ -94,7 +94,7 @@ export default function ExecutionPage() {
   const saveChatMessages = useCallback(
     async (newMessages: Message[]) => {
       if (!projectId) return newMessages;
-      const toSave = newMessages.filter((m) => isLocalMessageId(m.id));
+      const toSave = newMessages.filter((m) => isLocalMessageId(m.id) && m.role === "user");
 
       if (toSave.length > 0) {
         const saved = await apiFetch<{ messages: Array<{ id: string; role: string; content: string; timestamp: string }> }>(
@@ -147,6 +147,22 @@ export default function ExecutionPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    const refresh = () => {
+      if (document.visibilityState !== "visible") return;
+      void loadState(projectId);
+    };
+    const interval = window.setInterval(refresh, 5000);
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [loadState, projectId]);
 
   // Chat send handler
   const handleSend = useCallback(
@@ -826,21 +842,26 @@ function ContactDetailView({
   onEdit: () => void;
   onDelete: (id: string) => void;
 }) {
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  useEffect(() => {
+    setShowDeleteConfirm(false);
+  }, [contact?.id]);
+
   if (!contact) return null;
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-start justify-between border-b border-edge-subtle px-6 py-4">
-        <div className="flex items-center gap-4">
+        <div className="flex min-w-0 items-center gap-4">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-accent to-purple-500 text-lg font-semibold text-white">
             {(contact.name || contact.email || "?").charAt(0).toUpperCase()}
           </div>
-          <div>
-            <h2 className="text-base font-semibold text-fg-primary">
+          <div className="min-w-0">
+            <h2 className="truncate text-base font-semibold text-fg-primary">
               {contact.name || contact.email}
             </h2>
             {contact.name && (
-              <p className="text-sm text-fg-muted">{contact.email}</p>
+              <p className="truncate text-sm text-fg-muted">{contact.email}</p>
             )}
           </div>
         </div>
@@ -854,32 +875,68 @@ function ContactDetailView({
             </svg>
             Edit
           </button>
-          <button
-            onClick={() => {
-              if (window.confirm("Delete this contact?")) {
-                onDelete(contact.id);
-              }
-            }}
-            className="rounded-lg border border-red-500/30 p-1.5 text-red-400 transition-colors hover:bg-red-500/10"
-          >
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-          </button>
+          {!showDeleteConfirm && (
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="rounded-lg border border-red-500/30 p-1.5 text-red-400 transition-colors hover:bg-red-500/10"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6">
         <div className="space-y-4">
+          {showDeleteConfirm && (
+            <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-4">
+              <p className="text-sm font-medium text-red-400">
+                Delete "{contact.name || contact.email}"?
+              </p>
+              <p className="mt-1 text-sm text-fg-muted">
+                This action cannot be undone. The contact and its outreach references will be removed.
+              </p>
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={() => onDelete(contact.id)}
+                  className="rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-600"
+                >
+                  Yes, delete contact
+                </button>
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="rounded-lg border border-edge-subtle bg-surface-muted px-4 py-2 text-sm font-medium text-fg-secondary transition-colors hover:bg-surface-elevated"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-between rounded-lg border border-edge-subtle bg-surface-elevated p-4">
             <span className="text-sm text-fg-muted">Email</span>
-            <span className="font-mono text-sm text-fg-primary">{contact.email}</span>
+            <span className="max-w-[70%] break-all text-right font-mono text-sm text-fg-primary">{contact.email}</span>
           </div>
+          {contact.company && (
+            <div className="flex items-center justify-between rounded-lg border border-edge-subtle bg-surface-elevated p-4">
+              <span className="text-sm text-fg-muted">Company</span>
+              <span className="max-w-[70%] truncate text-sm text-fg-primary">{contact.company}</span>
+            </div>
+          )}
           {contact.segment && (
             <div className="flex items-center justify-between rounded-lg border border-edge-subtle bg-surface-elevated p-4">
               <span className="text-sm text-fg-muted">Segment</span>
               <span className="rounded-full bg-accent/10 px-3 py-1 text-xs font-medium text-accent">
                 {contact.segment}
+              </span>
+            </div>
+          )}
+          {contact.source && (
+            <div className="flex items-center justify-between rounded-lg border border-edge-subtle bg-surface-elevated p-4">
+              <span className="text-sm text-fg-muted">Source</span>
+              <span className="rounded-full bg-surface-muted px-3 py-1 text-xs font-medium text-fg-secondary">
+                {contact.source}
               </span>
             </div>
           )}

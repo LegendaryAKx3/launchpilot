@@ -29,6 +29,35 @@ interface ResearchState {
   opportunity_wedges: Array<{ id?: string; label: string; description?: string; score?: number }>;
 }
 
+interface PipelineStep {
+  id: string;
+  label: string;
+  status: "pending" | "in_progress" | "completed" | "failed";
+  details?: Record<string, unknown>;
+}
+
+interface PipelineStatus {
+  status?: "running" | "completed" | "error";
+  current_stage?: string;
+  updated_at?: string;
+  steps?: PipelineStep[];
+  summary?: Record<string, unknown>;
+  error?: string;
+}
+
+interface MemoryRow {
+  key: string;
+  value: Record<string, unknown>;
+}
+
+const PIPELINE_STEP_LABELS: Record<string, string> = {
+  research_analysis: "Analyze market and competitors",
+  lead_scout: "Discover target companies",
+  lead_enrichment: "Find decision-makers and emails",
+  lead_scoring: "Rank leads by expected value",
+  contacts_sync: "Add qualified leads to execution contacts"
+};
+
 export default function ResearchPage() {
   const params = useParams<{ projectSlug: string }>();
   const projectSlug = params.projectSlug;
@@ -43,6 +72,15 @@ export default function ResearchPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus | null>(null);
+
+  const loadPipelineStatus = useCallback(async (resolvedProjectId: string) => {
+    const memoryRows = await apiFetch<MemoryRow[]>(`/projects/${resolvedProjectId}/memory`);
+    if (!memoryRows) return;
+    const row = memoryRows.find((item) => item.key === "research_pipeline_status");
+    if (!row || !row.value || typeof row.value !== "object") return;
+    setPipelineStatus(row.value as unknown as PipelineStatus);
+  }, []);
 
   const loadChatMessages = useCallback(async (resolvedProjectId: string) => {
     const data = await apiFetch<{ messages: Array<{ id: string; role: string; content: string; timestamp: string }> }>(
@@ -63,7 +101,7 @@ export default function ResearchPage() {
   const saveChatMessages = useCallback(
     async (newMessages: Message[]) => {
       if (!projectId) return newMessages;
-      const toSave = newMessages.filter((m) => isLocalMessageId(m.id));
+      const toSave = newMessages.filter((m) => isLocalMessageId(m.id) && m.role === "user");
 
       if (toSave.length > 0) {
         const saved = await apiFetch<{ messages: Array<{ id: string; role: string; content: string; timestamp: string }> }>(
@@ -95,7 +133,8 @@ export default function ResearchPage() {
     }
     setState(data);
     await loadChatMessages(resolvedProjectId);
-  }, [loadChatMessages]);
+    await loadPipelineStatus(resolvedProjectId);
+  }, [loadChatMessages, loadPipelineStatus]);
 
   const load = useCallback(async () => {
     if (!projectSlug) return;
@@ -119,14 +158,41 @@ export default function ResearchPage() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    if (!projectId) return;
+    const refresh = () => {
+      if (document.visibilityState !== "visible") return;
+      void loadSnapshot(projectId);
+    };
+    const interval = window.setInterval(refresh, 5000);
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [loadSnapshot, projectId]);
+
   const handleSend = useCallback(
     async (message: string, mode: string): Promise<string | null> => {
       if (!projectId) return null;
       setRunning(true);
       setError(null);
+      let pollingActive = false;
 
       try {
         const endpoint = message.toLowerCase().includes("run") ? "run" : "advise";
+        pollingActive = true;
+        const poll = async () => {
+          if (!projectId || !pollingActive) return;
+          await loadPipelineStatus(projectId);
+          if (pollingActive) {
+            setTimeout(poll, 1200);
+          }
+        };
+        poll();
+
         const data = await apiFetch<{
           agent_trace?: Record<string, unknown>;
           run?: { status?: string; summary?: string };
@@ -151,6 +217,8 @@ export default function ResearchPage() {
         });
 
         if (!data) throw new Error(`Research ${endpoint} failed`);
+        pollingActive = false;
+        await loadPipelineStatus(projectId);
 
         setState({
           run: data.run,
@@ -190,16 +258,27 @@ export default function ResearchPage() {
         const fallback = parts.join(" ") || "Research analysis complete. Check the insights panel for details.";
         return `${fallback}\n\n**Next step:** ${stageGuidance}`;
       } catch (runError) {
+        pollingActive = false;
+        await loadPipelineStatus(projectId);
         setError(runError instanceof Error ? runError.message : "Failed to run research");
         return "I encountered an error while processing. Please try again.";
       } finally {
+        pollingActive = false;
         setRunning(false);
       }
     },
-    [projectId]
+    [loadPipelineStatus, projectId]
   );
 
   const continueHref = useMemo(() => `/app/projects/${projectSlug}/positioning`, [projectSlug]);
+  const researchAnalysisStep = useMemo(
+    () => (pipelineStatus?.steps ?? []).find((step) => step.id === "research_analysis") ?? null,
+    [pipelineStatus?.steps]
+  );
+  const leadPipelineSteps = useMemo(
+    () => (pipelineStatus?.steps ?? []).filter((step) => step.id !== "research_analysis"),
+    [pipelineStatus?.steps]
+  );
 
   const quickActions = [
     {
@@ -234,7 +313,7 @@ export default function ResearchPage() {
         <div>
           <h2 className="text-xl font-bold text-fg-primary">Research Agent</h2>
           <p className="mt-1 text-sm text-fg-muted">
-            Have a conversation to guide market research and competitive analysis.
+            Run research, prioritize outreach leads, and feed qualified contacts into execution.
           </p>
         </div>
         <Link
@@ -260,12 +339,18 @@ export default function ResearchPage() {
         <div className="overflow-hidden rounded-xl border border-edge-subtle bg-surface-muted">
           <AgentChat
             agentName="Research Agent"
-            agentDescription="Market research & competitive analysis"
+            agentDescription="Market research, lead scouting, enrichment, and prioritization"
             placeholder="Ask about competitors, pain points, market opportunities..."
             onSend={handleSend}
             isProcessing={running}
             messages={messages}
             onMessagesChange={saveChatMessages}
+            modes={[
+              { value: "baseline", label: "Standard" },
+              { value: "deepen", label: "Go deeper" },
+              { value: "retry", label: "Try again" },
+              { value: "extend", label: "Expand" }
+            ]}
             quickActions={quickActions}
           />
         </div>
@@ -280,7 +365,7 @@ export default function ResearchPage() {
             <div className="grid grid-cols-3 gap-2">
               <InsightCard title="Competitors" value={state.competitors.length} />
               <InsightCard title="Pain Points" value={state.pain_point_clusters.length} />
-              <InsightCard title="Wedges" value={state.opportunity_wedges.length} />
+              <InsightCard title="Growth Angles" value={state.opportunity_wedges.length} />
             </div>
 
             {/* Competitors */}
@@ -339,9 +424,9 @@ export default function ResearchPage() {
               )}
             </InsightSection>
 
-            {/* Opportunity Wedges */}
+            {/* Best Growth Angles */}
             <InsightSection
-              title="Opportunity Wedges"
+              title="Best Growth Angles"
               icon={
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -351,7 +436,7 @@ export default function ResearchPage() {
               accentColor="emerald"
             >
               {state.opportunity_wedges.length === 0 ? (
-                <InsightEmpty message="No wedges discovered yet" />
+                <InsightEmpty message="No growth angles discovered yet" />
               ) : (
                 <div className="space-y-2">
                   {state.opportunity_wedges.map((wedge, i) => (
@@ -363,6 +448,85 @@ export default function ResearchPage() {
                       badgeColor="emerald"
                     />
                   ))}
+                </div>
+              )}
+            </InsightSection>
+
+            <InsightSection
+              title="Research Analysis"
+              icon={
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4V9m5 8H4a1 1 0 01-1-1V4a1 1 0 011-1h16a1 1 0 011 1v12a1 1 0 01-1 1z" />
+                </svg>
+              }
+              count={researchAnalysisStep ? 1 : 0}
+              accentColor="blue"
+            >
+              {!researchAnalysisStep ? (
+                <InsightEmpty message="Run research to analyze competitors and pain points" />
+              ) : (
+                <InsightListItem
+                  title={PIPELINE_STEP_LABELS[researchAnalysisStep.id] || researchAnalysisStep.label}
+                  description={
+                    researchAnalysisStep.details
+                      ? Object.entries(researchAnalysisStep.details)
+                          .map(([k, v]) => `${k}: ${String(v)}`)
+                          .join(" | ")
+                      : undefined
+                  }
+                  badge={
+                    researchAnalysisStep.status === "completed"
+                      ? "done"
+                      : researchAnalysisStep.status === "in_progress"
+                        ? "running"
+                        : researchAnalysisStep.status
+                  }
+                  badgeColor={
+                    researchAnalysisStep.status === "failed"
+                      ? "red"
+                      : researchAnalysisStep.status === "completed"
+                        ? "emerald"
+                        : "amber"
+                  }
+                />
+              )}
+            </InsightSection>
+
+            <InsightSection
+              title="Lead Generation Pipeline"
+              icon={
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v3m6.364 1.636l-2.121 2.121M21 12h-3m-1.636 6.364l-2.121-2.121M12 21v-3m-6.364-1.636l2.121-2.121M3 12h3m1.636-6.364l2.121 2.121" />
+                </svg>
+              }
+              count={leadPipelineSteps.length}
+              accentColor="purple"
+            >
+              {!leadPipelineSteps.length ? (
+                <InsightEmpty message="Run research to view live pipeline steps" />
+              ) : (
+                <div className="space-y-2">
+                  {leadPipelineSteps.map((step) => {
+                    const indicator =
+                      step.status === "completed" ? "done" : step.status === "in_progress" ? "running" : step.status;
+                    const detailsText = step.details
+                      ? Object.entries(step.details)
+                          .map(([k, v]) => `${k}: ${String(v)}`)
+                          .join(" | ")
+                      : undefined;
+                    return (
+                      <InsightListItem
+                        key={step.id}
+                        title={PIPELINE_STEP_LABELS[step.id] || step.label}
+                        description={detailsText}
+                        badge={indicator}
+                        badgeColor={step.status === "failed" ? "red" : step.status === "completed" ? "emerald" : "amber"}
+                      />
+                    );
+                  })}
+                  <p className="text-xs text-fg-faint">
+                    {running ? "Pipeline is running..." : `Pipeline status: ${pipelineStatus?.status ?? "unknown"}`}
+                  </p>
                 </div>
               )}
             </InsightSection>

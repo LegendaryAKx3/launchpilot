@@ -16,6 +16,7 @@ Depth requirements:
 - Pain points: identify 3-6 clusters with clear user/job context.
 - Wedges: propose 3-5 differentiated wedges with feasibility-aware scoring.
 - Risk warnings: include non-obvious risks that could materially affect launch outcomes.
+- Outreach contacts: propose 5-15 likely decision-maker or influencer emails to test outreach quickly.
 
 Analysis method:
 1. Classify the market category and user jobs-to-be-done.
@@ -24,6 +25,7 @@ Analysis method:
 4. Extract recurring pain patterns and practical evidence from available context.
 5. Generate wedge opportunities and score each from 0.0-1.0.
 6. Summarize tradeoffs and recommend where to focus first.
+7. Propose prioritized outreach contacts for early validation and partnerships.
 
 Scoring guidance for opportunity_wedges.score:
 - 0.0-0.3: weak differentiation or hard to execute quickly
@@ -66,6 +68,16 @@ Output schema (exact top-level keys):
     }
   ],
   "risk_warnings": ["string"],
+  "outreach_contacts": [
+    {
+      "name": "string",
+      "email": "string",
+      "company": "string",
+      "role": "string",
+      "priority": 1,
+      "reason": "string"
+    }
+  ],
   "summary": "string",
   "chat_message": "string",
   "next_step_suggestion": "string",
@@ -80,6 +92,7 @@ Field quality standards:
 - pain_point_clusters.description: include user impact, frequency, and consequence.
 - pain_point_clusters.evidence: concise, concrete statements from available context.
 - opportunity_wedges.description: describe the angle, why it can win, and what makes it defensible.
+- outreach_contacts: prioritize by expected response likelihood and strategic value (1 = highest). Use realistic best-effort emails. If uncertain, include "ASSUMPTION:" in reason.
 - summary: 5-8 sentences with clear focus recommendation and key tradeoffs.
 - chat_message: user-friendly conversational response that explains what was learned and why it matters.
 - next_step_suggestion: one specific next action the user should take now.

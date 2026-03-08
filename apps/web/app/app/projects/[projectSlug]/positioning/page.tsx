@@ -65,7 +65,7 @@ export default function PositioningPage() {
   const saveChatMessages = useCallback(
     async (newMessages: Message[]) => {
       if (!projectId) return newMessages;
-      const toSave = newMessages.filter((m) => isLocalMessageId(m.id));
+      const toSave = newMessages.filter((m) => isLocalMessageId(m.id) && m.role === "user");
 
       if (toSave.length > 0) {
         const saved = await apiFetch<{ messages: Array<{ id: string; role: string; content: string; timestamp: string }> }>(
@@ -120,6 +120,22 @@ export default function PositioningPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    const refresh = () => {
+      if (document.visibilityState !== "visible") return;
+      void loadVersions(projectId);
+    };
+    const interval = window.setInterval(refresh, 5000);
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [loadVersions, projectId]);
 
   const handleSend = useCallback(
     async (message: string, mode: string): Promise<string | null> => {

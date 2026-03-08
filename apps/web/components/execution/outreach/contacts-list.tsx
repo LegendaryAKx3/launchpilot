@@ -9,7 +9,10 @@ export interface Contact {
   id: string;
   name?: string;
   email?: string;
+  company?: string;
   segment?: string;
+  source?: string;
+  personalization_notes?: string;
 }
 
 interface ContactsListProps {
@@ -31,6 +34,7 @@ export function ContactsList({
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [adding, setAdding] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const handleAdd = useCallback(async () => {
     if (!newEmail.trim()) return;
@@ -48,9 +52,8 @@ export function ContactsList({
   const handleDelete = useCallback(
     async (e: React.MouseEvent, contactId: string) => {
       e.stopPropagation();
-      if (window.confirm("Are you sure you want to delete this contact?")) {
-        await onDeleteContact(contactId);
-      }
+      await onDeleteContact(contactId);
+      setConfirmDeleteId(null);
     },
     [onDeleteContact]
   );
@@ -138,25 +141,25 @@ export function ContactsList({
                 key={contact.id}
                 onClick={() => onSelectContact(selectedContactId === contact.id ? null : contact.id)}
                 className={cn(
-                  "group flex cursor-pointer items-center justify-between rounded-xl border p-4 transition-all",
+                  "group flex cursor-pointer items-center justify-between gap-3 rounded-xl border p-4 transition-all",
                   selectedContactId === contact.id
                     ? "border-accent bg-accent/5 shadow-sm"
                     : "border-edge-subtle bg-surface-elevated hover:border-edge-muted"
                 )}
               >
-                <div className="flex items-center gap-3">
+                <div className="flex min-w-0 items-center gap-3">
                   {/* Avatar */}
                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-accent to-purple-500 text-sm font-medium text-white">
                     {(contact.name || contact.email || "?").charAt(0).toUpperCase()}
                   </div>
 
                   {/* Info */}
-                  <div>
-                    <p className="text-sm font-medium text-fg-primary">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-fg-primary">
                       {contact.name || contact.email}
                     </p>
                     {contact.name && (
-                      <p className="text-xs text-fg-muted">{contact.email}</p>
+                      <p className="truncate text-xs text-fg-muted">{contact.email}</p>
                     )}
                     {contact.segment && (
                       <span className="mt-1 inline-block rounded-full bg-surface-muted px-2 py-0.5 text-xs text-fg-faint">
@@ -167,19 +170,42 @@ export function ContactsList({
                 </div>
 
                 {/* Delete button */}
-                <button
-                  onClick={(e) => handleDelete(e, contact.id)}
-                  className="rounded-lg p-2 text-fg-faint opacity-0 transition-all hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    />
-                  </svg>
-                </button>
+                {confirmDeleteId === contact.id ? (
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      onClick={(e) => handleDelete(e, contact.id)}
+                      className="rounded-md bg-red-500 px-2 py-1 text-xs font-medium text-white hover:bg-red-600"
+                    >
+                      Delete
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setConfirmDeleteId(null);
+                      }}
+                      className="rounded-md border border-edge-subtle px-2 py-1 text-xs text-fg-secondary hover:bg-surface-overlay"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirmDeleteId(contact.id);
+                    }}
+                    className="shrink-0 rounded-lg p-2 text-fg-faint opacity-0 transition-all hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                      />
+                    </svg>
+                  </button>
+                )}
               </div>
             ))}
           </div>

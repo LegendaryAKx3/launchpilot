@@ -17,6 +17,7 @@ from app.agents.shared_context import build_project_context
 from app.db.session import get_db
 from app.integrations.backboard_client import BackboardRequestError
 from app.models.approval import Approval
+from app.models.chat import AgentChatMessage
 from app.models.execution import Asset, Contact, LaunchPlan, LaunchTask, OutboundBatch, OutboundMessage
 from app.routers.utils import success
 from app.schemas.execution import (
@@ -133,6 +134,32 @@ def _build_image_render_url(prompt: str) -> str:
     return f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&model=flux"
 
 
+def _store_execution_assistant_reply(
+    db: Session,
+    *,
+    project_id: UUID,
+    content: str | None,
+    mode: str | None = None,
+    next_step_suggestion: str | None = None,
+) -> None:
+    text = (content or "").strip()
+    if not text:
+        return
+    db.add(
+        AgentChatMessage(
+            project_id=str(project_id),
+            agent_type="execution",
+            role="assistant",
+            content=text,
+            message_metadata={
+                "source": "agent_run",
+                "mode": mode,
+                "next_step_suggestion": next_step_suggestion,
+            },
+        )
+    )
+
+
 @router.post("/plan")
 def generate_execution_plan(
     project_id: UUID,
@@ -186,6 +213,13 @@ def generate_execution_plan(
         "launch_plan",
         str(plan.id),
         metadata={"agent_trace": trace, "mode": payload.mode, "advice": payload.advice},
+    )
+    _store_execution_assistant_reply(
+        db,
+        project_id=project_id,
+        content=output.get("chat_message"),
+        mode=payload.mode,
+        next_step_suggestion=output.get("next_step_suggestion"),
     )
 
     db.commit()
@@ -278,6 +312,13 @@ def generate_assets(
         None,
         metadata={"agent_trace": trace, "mode": payload.mode, "advice": payload.advice, "count": len(created_assets)},
     )
+    _store_execution_assistant_reply(
+        db,
+        project_id=project_id,
+        content=output.get("chat_message"),
+        mode=payload.mode,
+        next_step_suggestion=output.get("next_step_suggestion"),
+    )
     db.commit()
     BackboardProjectStateService(db).sync_after_action(
         project_id=str(project_id),
@@ -350,6 +391,13 @@ def generate_image_ad_draft(
         "asset",
         None,
         metadata={"agent_trace": trace, "mode": payload.mode, "advice": payload.advice, "asset_id": str(asset.id)},
+    )
+    _store_execution_assistant_reply(
+        db,
+        project_id=project_id,
+        content=output.get("chat_message"),
+        mode=payload.mode,
+        next_step_suggestion=output.get("next_step_suggestion"),
     )
     db.commit()
     BackboardProjectStateService(db).sync_after_action(
@@ -608,6 +656,13 @@ def prepare_email_batch(
         str(batch.id),
         metadata={"agent_trace": trace, "mode": payload.mode, "advice": payload.advice, "messages_prepared": len(valid_drafts)},
     )
+    _store_execution_assistant_reply(
+        db,
+        project_id=project_id,
+        content=output.get("chat_message"),
+        mode=payload.mode,
+        next_step_suggestion=output.get("next_step_suggestion"),
+    )
 
     db.commit()
     BackboardProjectStateService(db).sync_after_action(
@@ -750,7 +805,18 @@ def get_execution_state(
                 }
                 for a in assets
             ],
-            "contacts": [{"id": str(c.id), "name": c.name, "email": c.email, "segment": c.segment} for c in contacts],
+            "contacts": [
+                {
+                    "id": str(c.id),
+                    "name": c.name,
+                    "email": c.email,
+                    "company": c.company,
+                    "segment": c.segment,
+                    "source": c.source,
+                    "personalization_notes": c.personalization_notes,
+                }
+                for c in contacts
+            ],
             "batches": [
                 {
                     "id": str(b.id),
