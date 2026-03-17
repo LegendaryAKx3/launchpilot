@@ -7,7 +7,7 @@ import { auth0 } from "@/lib/auth0";
 
 export default async function ProtectedLayout({ children }: { children: ReactNode }) {
   if (!auth0) {
-    return <AppShell>{children}</AppShell>;
+    redirect("/login");
   }
 
   const session = await auth0.getSession();

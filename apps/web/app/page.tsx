@@ -5,6 +5,7 @@ import { isAuthEnabled } from "@/lib/auth0";
 
 export default function LandingPage() {
   const authEnabled = isAuthEnabled();
+  const primaryHref = "/auth/login?returnTo=%2Fapp%2Fprojects";
 
   return (
     <main className="relative mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-10">
@@ -30,10 +31,10 @@ export default function LandingPage() {
             Log in
           </Link>
           <Link
-            href={authEnabled ? "/auth/login?returnTo=%2Fapp%2Fprojects" : "/app"}
+            href={primaryHref}
             className="rounded-lg bg-accent px-4 py-2 font-medium text-white transition-colors hover:bg-accent-hover"
           >
-            {authEnabled ? "Get Started" : "Open App"}
+            Get Started
           </Link>
         </nav>
       </header>
@@ -53,16 +54,16 @@ export default function LandingPage() {
           </p>
           <div className="flex gap-3 pt-2">
             <Link
-              href={authEnabled ? "/auth/login?returnTo=%2Fapp%2Fprojects" : "/app"}
+              href={primaryHref}
               className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-accent/25 transition-all hover:bg-accent-hover hover:shadow-xl hover:shadow-accent/30"
             >
-              {authEnabled ? "Start with Auth0" : "Start in Dev Mode"}
+              Start with Auth0
             </Link>
             <Link
-              href="/app"
+              href="/login"
               className="rounded-lg border border-edge-subtle bg-surface-muted px-5 py-2.5 text-sm font-medium text-fg-secondary transition-colors hover:border-edge-muted hover:text-fg-primary"
             >
-              Open Projects
+              Log In
             </Link>
           </div>
         </div>

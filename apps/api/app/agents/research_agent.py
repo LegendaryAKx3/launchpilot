@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.prompts.research_prompt import RESEARCH_PROMPT
 from app.services.backboard_stage_service import BackboardStageService
+from app.services.contact_sanitizer import name_looks_like_role
 
 
 def run_research_agent(
@@ -23,9 +24,13 @@ def run_research_agent(
             email = str(item.get("email") or "").strip().lower()
             if not email:
                 continue
+            raw_name = str(item.get("name") or "").strip() or None
+            # Strip names that look like role titles (e.g. "Head of Growth")
+            if raw_name and name_looks_like_role(raw_name):
+                raw_name = None
             contacts.append(
                 {
-                    "name": str(item.get("name") or "").strip() or None,
+                    "name": raw_name,
                     "email": email,
                     "company": str(item.get("company") or "").strip() or None,
                     "role": str(item.get("role") or "").strip() or None,

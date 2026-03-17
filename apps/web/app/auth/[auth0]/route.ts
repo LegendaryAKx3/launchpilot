@@ -8,10 +8,14 @@ function authActionFromRequest(request: Request) {
   return parts[parts.length - 1] ?? "";
 }
 
-function authDisabledResponse(request: Request) {
-  const action = authActionFromRequest(request);
-  const redirectTo = action === "logout" ? "/login" : "/app";
-  return NextResponse.redirect(new URL(redirectTo, request.url));
+function authDisabledResponse() {
+  return NextResponse.json(
+    {
+      error: "AUTH0_NOT_CONFIGURED",
+      message: "Auth0 is required but is not configured for this deployment."
+    },
+    { status: 503 }
+  );
 }
 
 function authRouteErrorResponse(error: unknown) {
@@ -19,7 +23,7 @@ function authRouteErrorResponse(error: unknown) {
     {
       error: "AUTH0_ROUTE_ERROR",
       message: error instanceof Error ? error.message : "Unknown Auth0 route error.",
-      hint: "If you are in local dev, set AUTH_MODE=dev and use /app directly."
+      hint: "Configure the required Auth0 environment variables for this deployment."
     },
     { status: 500 }
   );
@@ -27,7 +31,7 @@ function authRouteErrorResponse(error: unknown) {
 
 export async function GET(request: Request) {
   if (!isAuthEnabled()) {
-    return authDisabledResponse(request);
+    return authDisabledResponse();
   }
 
   try {
@@ -39,7 +43,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   if (!isAuthEnabled()) {
-    return authDisabledResponse(request);
+    return authDisabledResponse();
   }
 
   try {

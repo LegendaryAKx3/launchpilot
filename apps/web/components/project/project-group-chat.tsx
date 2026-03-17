@@ -333,7 +333,22 @@ export function ProjectGroupChat() {
         lower.includes("find leads") ||
         lower.includes("lead list") ||
         lower.includes("prospects") ||
-        lower.includes("lead generation");
+        lower.includes("lead generation") ||
+        lower.includes("find emails") ||
+        lower.includes("get emails") ||
+        lower.includes("get contacts") ||
+        lower.includes("email list") ||
+        lower.includes("contact list") ||
+        lower.includes("who should i reach") ||
+        lower.includes("who to reach") ||
+        lower.includes("reach out to") ||
+        lower.includes("outreach list") ||
+        lower.includes("target companies") ||
+        lower.includes("target list") ||
+        lower.includes("build a list") ||
+        lower.includes("scrape") ||
+        lower.includes("enrich leads") ||
+        lower.includes("find companies");
 
       if (isContactGenerationRequest) {
         const contactAdvice = [
@@ -345,7 +360,7 @@ export function ProjectGroupChat() {
         ].join(" ");
         const data = await apiFetch<{
           chat_message?: string;
-          contacts_upserted?: Array<{ email?: string }>;
+          contacts_upserted?: Array<{ email?: string; company?: string }>;
           lead_pipeline?: { status?: string; message?: string };
         }>(
           `/projects/${projectId}/research/run`,
@@ -353,11 +368,17 @@ export function ProjectGroupChat() {
         );
         setExecutionFocus("outreach", "contacts");
         const seededCount = Array.isArray(data?.contacts_upserted) ? data!.contacts_upserted.length : 0;
-        const statusText = data?.lead_pipeline?.message ? ` ${data.lead_pipeline.message}` : "";
+        const withEmail = Array.isArray(data?.contacts_upserted) ? data!.contacts_upserted.filter((c) => c.email).length : 0;
+        const companyOnly = seededCount - withEmail;
+        const parts = [data?.chat_message?.trim() || "Contact generation started."];
+        if (seededCount > 0) {
+          parts.push(`\n\n${seededCount} contacts seeded initially.`);
+          if (withEmail > 0) parts.push(`${withEmail} with emails.`);
+          if (companyOnly > 0) parts.push(`${companyOnly} companies listed (no valid email found).`);
+        }
+        parts.push("\n\nThe lead pipeline is running in the background — more contacts will appear shortly. Check the Contacts tab in a few seconds.");
         return {
-          content:
-            (data?.chat_message?.trim() || "Started context-aware contact generation from research.") +
-            `\n\nSeeded contacts now: ${seededCount}.${statusText}`,
+          content: parts.join(" "),
           agentLabel: "Auto Router -> Contact Pipeline"
         };
       }

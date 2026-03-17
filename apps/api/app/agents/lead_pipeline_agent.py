@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from app.prompts.lead_enrichment_prompt import LEAD_ENRICHMENT_PROMPT
 from app.prompts.lead_scout_prompt import LEAD_SCOUT_PROMPT
 from app.services.backboard_stage_service import BackboardStageService
+from app.services.contact_sanitizer import sanitize_contact_name
 
 
 def _project_name(context: dict) -> str:
@@ -163,7 +164,10 @@ def run_lead_enrichment_agent(
                     "company_name": company_name,
                     "domain": _clean_domain(str(item.get("domain") or "")),
                     "website": str(item.get("website") or "").strip() or None,
-                    "contact_name": str(item.get("contact_name") or "").strip() or None,
+                    "contact_name": sanitize_contact_name(
+                        str(item.get("contact_name") or "").strip() or None,
+                        _clamp01(item.get("confidence"), 0.4),
+                    ),
                     "contact_role": str(item.get("contact_role") or "").strip() or None,
                     "contact_email": email,
                     "estimated_acv_usd": max(0, acv),
@@ -189,7 +193,7 @@ def run_lead_enrichment_agent(
         deduped.append(lead)
 
     normalized = {
-        "leads": deduped[:20],
+        "leads": deduped,
         "summary": str(response.get("summary") or "").strip(),
     }
     return normalized, {

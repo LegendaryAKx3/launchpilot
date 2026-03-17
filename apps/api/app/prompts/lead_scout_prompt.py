@@ -9,7 +9,8 @@ Objective:
 Rules:
 - Return only valid JSON. No markdown.
 - Include 10-25 candidate companies.
-- Prioritize realistic, currently active companies.
+- Prioritize realistic, currently active companies that you can verify exist through web research or provided context.
+- Do not invent or fabricate company names. Only include companies you have evidence for.
 - If uncertain, include "ASSUMPTION:" in why_fit.
 
 Output schema:

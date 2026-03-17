@@ -129,10 +129,13 @@ export default function ExecutionPage() {
         selectedItemId: null,
         outreachSubTab: nextOutreachSubTab ?? s.outreachSubTab
       }));
+      // Immediately refresh execution state when tab focus is requested
+      // (e.g. after contact generation triggers)
+      if (projectId) void loadState(projectId);
     };
     window.addEventListener("execution:focus-tab", onFocusTab as EventListener);
     return () => window.removeEventListener("execution:focus-tab", onFocusTab as EventListener);
-  }, []);
+  }, [loadState, projectId]);
 
   // Task handlers
   const handleSaveTask = useCallback(
@@ -460,9 +463,9 @@ export default function ExecutionPage() {
                   </div>
                 </div>
 
-                <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[340px_minmax(0,1fr)]">
+                <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_1fr] lg:grid-cols-[340px_minmax(0,1fr)] lg:grid-rows-[1fr]">
                   {/* List Panel */}
-                  <div className="min-h-0 overflow-hidden border-b border-edge-subtle bg-surface-subtle/20 lg:border-b-0 lg:border-r">
+                  <div className="min-h-0 max-h-[40vh] overflow-y-auto border-b border-edge-subtle bg-surface-subtle/20 lg:max-h-none lg:overflow-hidden lg:border-b-0 lg:border-r">
                     {pageState.activeTab === "outreach" && (
                       <div className="flex h-full min-h-0 flex-col">
                         <OutreachSubTabs
@@ -515,7 +518,7 @@ export default function ExecutionPage() {
                   </div>
 
                   {/* Detail Panel */}
-                  <div className="min-h-0 min-w-0 overflow-hidden bg-surface-muted/20">
+                  <div className="min-h-0 min-w-0 overflow-y-auto bg-surface-muted/20">
                     {/* Outreach detail */}
                     {pageState.activeTab === "outreach" && (
                       pageState.outreachSubTab === "batches" ? (

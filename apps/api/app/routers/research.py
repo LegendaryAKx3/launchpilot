@@ -1,8 +1,11 @@
 from datetime import datetime, timezone
+import logging
 import re
 from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 import dns.resolver
 import httpx
@@ -27,6 +30,7 @@ from app.security.permissions import require_scope
 from app.services.audit_service import AuditService
 from app.services.backboard_project_state_service import BackboardProjectStateService
 from app.services.backboard_stage_service import BackboardStageService
+from app.services.contact_sanitizer import name_looks_like_role, sanitize_contact_name
 from app.services.lead_scoring_service import score_enriched_leads
 from app.services.memory_service import upsert_project_memory
 from app.services.project_service import ProjectService
@@ -254,6 +258,10 @@ def _is_assumption_text(text: str | None) -> bool:
     return "assumption" in (text or "").strip().lower()
 
 
+_name_looks_like_role = name_looks_like_role
+_sanitize_contact_name = sanitize_contact_name
+
+
 def _build_combined_contact_candidates(
     *,
     outreach_contacts: list[dict[str, Any]],
@@ -261,12 +269,12 @@ def _build_combined_contact_candidates(
 ) -> list[dict[str, Any]]:
     combined: list[dict[str, Any]] = []
     seen_emails: set[str] = set()
+    seen_companies: set[str] = set()
 
     for lead in ranked_leads:
         email = str(lead.get("contact_email") or "").strip().lower()
-        if not _is_valid_email(email) or email in seen_emails:
-            continue
-        seen_emails.add(email)
+        company = str(lead.get("company_name") or "").strip() or None
+        has_valid_email = _is_valid_email(email) and email not in seen_emails
         priority = lead.get("priority")
         if not isinstance(priority, int) or priority < 1:
             priority = len(combined) + 1
@@ -275,41 +283,90 @@ def _build_combined_contact_candidates(
             f"expected value ${lead.get('expected_value_usd', 0)}. "
             f"{str(lead.get('why_now') or '').strip()}"
         ).strip()
-        combined.append(
-            {
-                "name": str(lead.get("contact_name") or "").strip() or None,
-                "email": email,
-                "company": str(lead.get("company_name") or "").strip() or None,
-                "role": str(lead.get("contact_role") or "").strip() or None,
-                "priority": priority,
-                "reason": reason,
-                "source": "lead_pipeline",
-                "score": lead.get("profitability_score"),
-                "expected_value_usd": lead.get("expected_value_usd"),
-                "confidence": lead.get("confidence"),
-                "evidence_urls": lead.get("evidence_urls") if isinstance(lead.get("evidence_urls"), list) else [],
-            }
-        )
+        lead_confidence = lead.get("confidence")
+
+        if has_valid_email:
+            seen_emails.add(email)
+            if company:
+                seen_companies.add(company.lower())
+            combined.append(
+                {
+                    "name": _sanitize_contact_name(
+                        str(lead.get("contact_name") or "").strip() or None,
+                        lead_confidence,
+                    ),
+                    "email": email,
+                    "company": company,
+                    "role": str(lead.get("contact_role") or "").strip() or None,
+                    "priority": priority,
+                    "reason": reason,
+                    "source": "lead_pipeline",
+                    "score": lead.get("profitability_score"),
+                    "expected_value_usd": lead.get("expected_value_usd"),
+                    "confidence": lead_confidence,
+                    "evidence_urls": lead.get("evidence_urls") if isinstance(lead.get("evidence_urls"), list) else [],
+                }
+            )
+        elif company and company.lower() not in seen_companies:
+            # No valid email found — still include the company so the user sees it.
+            seen_companies.add(company.lower())
+            combined.append(
+                {
+                    "name": None,
+                    "email": None,
+                    "email_status": "no_valid_email_found",
+                    "company": company,
+                    "role": str(lead.get("contact_role") or "").strip() or None,
+                    "priority": priority,
+                    "reason": f"No valid email found. {reason}",
+                    "source": "lead_pipeline",
+                    "score": lead.get("profitability_score"),
+                    "expected_value_usd": lead.get("expected_value_usd"),
+                    "confidence": lead_confidence,
+                    "evidence_urls": lead.get("evidence_urls") if isinstance(lead.get("evidence_urls"), list) else [],
+                }
+            )
 
     for idx, item in enumerate(outreach_contacts, start=1):
         email = str(item.get("email") or "").strip().lower()
-        if not _is_valid_email(email) or email in seen_emails:
-            continue
-        seen_emails.add(email)
+        company = str(item.get("company") or "").strip() or None
+        has_valid_email = _is_valid_email(email) and email not in seen_emails
         priority = item.get("priority")
         if not isinstance(priority, int) or priority < 1:
             priority = idx
-        combined.append(
-            {
-                "name": str(item.get("name") or "").strip() or None,
-                "email": email,
-                "company": str(item.get("company") or "").strip() or None,
-                "role": str(item.get("role") or "").strip() or None,
-                "priority": priority,
-                "reason": str(item.get("reason") or "").strip() or None,
-                "source": "research_agent",
-            }
-        )
+
+        if has_valid_email:
+            seen_emails.add(email)
+            if company:
+                seen_companies.add(company.lower())
+            combined.append(
+                {
+                    "name": _sanitize_contact_name(
+                        str(item.get("name") or "").strip() or None,
+                        item.get("confidence"),
+                    ),
+                    "email": email,
+                    "company": company,
+                    "role": str(item.get("role") or "").strip() or None,
+                    "priority": priority,
+                    "reason": str(item.get("reason") or "").strip() or None,
+                    "source": "research_agent",
+                }
+            )
+        elif company and company.lower() not in seen_companies:
+            seen_companies.add(company.lower())
+            combined.append(
+                {
+                    "name": None,
+                    "email": None,
+                    "email_status": "no_valid_email_found",
+                    "company": company,
+                    "role": str(item.get("role") or "").strip() or None,
+                    "priority": priority,
+                    "reason": f"No valid email found. {str(item.get('reason') or '').strip()}".strip(),
+                    "source": "research_agent",
+                }
+            )
 
     return combined
 
@@ -319,45 +376,52 @@ def _iso_now() -> str:
 
 
 def _fallback_enriched_leads_from_scout(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    role_to_local_part = [
-        ("Head of Growth", "growth"),
-        ("Marketing Lead", "marketing"),
-        ("Partnerships Lead", "partnerships"),
-        ("Founder", "founder"),
+    # Try multiple common role inboxes per company domain.
+    role_inboxes = [
+        ("General Contact", "info"),
+        ("General Contact", "hello"),
+        ("General Contact", "contact"),
+        ("Sales", "sales"),
+        ("Growth", "growth"),
+        ("Partnerships", "partnerships"),
+        ("Business", "business"),
+        ("Support", "support"),
+        ("Team", "team"),
     ]
     leads: list[dict[str, Any]] = []
-    for idx, candidate in enumerate(candidates, start=1):
+    for candidate in candidates:
         if not isinstance(candidate, dict):
             continue
         company_name = str(candidate.get("company_name") or "").strip()
         domain = str(candidate.get("domain") or "").strip().lower()
         if not company_name or not domain:
             continue
-        role, local_part = role_to_local_part[(idx - 1) % len(role_to_local_part)]
-        leads.append(
-            {
-                "company_name": company_name,
-                "domain": domain,
-                "website": candidate.get("website"),
-                "contact_name": role,
-                "contact_role": role,
-                "contact_email": f"{local_part}@{domain}",
-                "estimated_acv_usd": int(candidate.get("estimated_acv_usd") or 0),
-                "estimated_close_probability": 0.22,
-                "estimated_sales_cycle_days": 60,
-                "fit_score": float(candidate.get("confidence") or 0.45),
-                "risk_score": 0.45,
-                "confidence": min(float(candidate.get("confidence") or 0.4), 0.55),
-                "why_now": (
-                    str(candidate.get("why_fit") or "").strip()
-                    or "ASSUMPTION: Candidate aligns with ICP and likely has current buying trigger."
-                ),
-                "personalization_angle": "Reference current initiatives and offer a focused pilot.",
-                "evidence_urls": candidate.get("evidence_urls") if isinstance(candidate.get("evidence_urls"), list) else [],
-                "fallback_generated": True,
-            }
-        )
-    return leads[:15]
+        # Generate one lead per role inbox for this company.
+        for role, local_part in role_inboxes:
+            leads.append(
+                {
+                    "company_name": company_name,
+                    "domain": domain,
+                    "website": candidate.get("website"),
+                    "contact_name": None,
+                    "contact_role": role,
+                    "contact_email": f"{local_part}@{domain}",
+                    "estimated_acv_usd": int(candidate.get("estimated_acv_usd") or 0),
+                    "estimated_close_probability": 0.22,
+                    "estimated_sales_cycle_days": 60,
+                    "fit_score": float(candidate.get("confidence") or 0.45),
+                    "risk_score": 0.45,
+                    "confidence": min(float(candidate.get("confidence") or 0.4), 0.55),
+                    "why_now": (
+                        str(candidate.get("why_fit") or "").strip()
+                        or "ASSUMPTION: Candidate aligns with ICP and likely has current buying trigger."
+                    ),
+                    "personalization_angle": "Reference current initiatives and offer a focused pilot.",
+                    "evidence_urls": candidate.get("evidence_urls") if isinstance(candidate.get("evidence_urls"), list) else [],
+                    "fallback_generated": True,
+                }
+            )
+    return leads
 
 
 def _fast_ranked_leads_from_research_output(output: dict[str, Any]) -> list[dict[str, Any]]:
@@ -369,9 +433,11 @@ def _fast_ranked_leads_from_research_output(output: dict[str, Any]) -> list[dict
         if not isinstance(item, dict):
             continue
         email = str(item.get("email") or "").strip().lower()
-        if not _is_valid_email(email):
-            continue
+        has_valid_email = _is_valid_email(email)
         company = str(item.get("company") or "").strip() or "Unknown"
+        # Must have either a valid email or a company name.
+        if not has_valid_email and company == "Unknown":
+            continue
         priority = item.get("priority")
         if not isinstance(priority, int) or priority < 1:
             priority = idx
@@ -383,11 +449,14 @@ def _fast_ranked_leads_from_research_output(output: dict[str, Any]) -> list[dict
         leads.append(
             {
                 "company_name": company,
-                "domain": email.split("@")[-1],
+                "domain": email.split("@")[-1] if has_valid_email else None,
                 "website": None,
-                "contact_name": str(item.get("name") or "").strip() or None,
+                "contact_name": _sanitize_contact_name(
+                    str(item.get("name") or "").strip() or None,
+                    confidence,
+                ),
                 "contact_role": str(item.get("role") or "").strip() or None,
-                "contact_email": email,
+                "contact_email": email if has_valid_email else None,
                 "estimated_acv_usd": acv,
                 "estimated_close_probability": close_probability,
                 "estimated_sales_cycle_days": cycle_days,
@@ -401,7 +470,7 @@ def _fast_ranked_leads_from_research_output(output: dict[str, Any]) -> list[dict
                 "fast_pipeline_generated": True,
             }
         )
-    return score_enriched_leads(leads)[:15]
+    return score_enriched_leads(leads)
 
 
 def _fallback_scout_candidates_from_research_output(output: dict[str, Any]) -> list[dict[str, Any]]:
@@ -409,27 +478,32 @@ def _fallback_scout_candidates_from_research_output(output: dict[str, Any]) -> l
     if not isinstance(raw_contacts, list):
         return []
     candidates: list[dict[str, Any]] = []
-    seen_domains: set[str] = set()
+    seen_keys: set[str] = set()
     for item in raw_contacts:
         if not isinstance(item, dict):
             continue
         email = str(item.get("email") or "").strip().lower()
+        company = str(item.get("company") or "").strip()
         reason = str(item.get("reason") or "").strip()
-        if not _is_business_email(email):
-            continue
         if _is_assumption_text(reason):
             continue
-        domain = email.split("@")[-1].strip().lower()
-        if not domain or domain in seen_domains:
+
+        has_business_email = _is_business_email(email)
+        domain = email.split("@")[-1].strip().lower() if has_business_email else None
+
+        # Derive a dedup key from domain or company name.
+        dedup_key = domain or company.lower()
+        if not dedup_key or dedup_key in seen_keys:
             continue
-        seen_domains.add(domain)
-        company = str(item.get("company") or "").strip() or domain.split(".")[0].title()
-        why_fit = str(item.get("reason") or "").strip() or "Derived from research outreach contact evidence."
+        seen_keys.add(dedup_key)
+
+        company = company or (domain.split(".")[0].title() if domain else "Unknown")
+        why_fit = reason or "Derived from research outreach contact evidence."
         candidates.append(
             {
                 "company_name": company,
                 "domain": domain,
-                "website": f"https://{domain}",
+                "website": f"https://{domain}" if domain else None,
                 "industry": None,
                 "location": None,
                 "why_fit": why_fit,
@@ -440,7 +514,7 @@ def _fallback_scout_candidates_from_research_output(output: dict[str, Any]) -> l
                 "fallback_generated": True,
             }
         )
-    return candidates[:15]
+    return candidates
 
 
 def _prompt_requests_deepen(advice: str | None) -> bool:
@@ -523,23 +597,32 @@ def _upsert_contact_candidates(
 ) -> list[dict[str, Any]]:
     contacts_upserted: list[dict[str, Any]] = []
     for idx, item in enumerate(contact_candidates, start=1):
-        email = str(item.get("email") or "").strip().lower()
-        if not _is_business_email(email):
+        email = str(item.get("email") or "").strip().lower() or None
+        email_status = str(item.get("email_status") or "").strip() or None
+        company = str(item.get("company") or "").strip() or None
+
+        # Skip entries that have neither a usable email nor a company.
+        if not email and not company:
             continue
+
         priority = item.get("priority")
         if not isinstance(priority, int) or priority < 1:
             priority = idx
         name = str(item.get("name") or "").strip() or None
-        company = str(item.get("company") or "").strip() or None
         role = str(item.get("role") or "").strip() or None
         reason = str(item.get("reason") or "").strip() or None
         source = str(item.get("source") or "research_agent")
         if _is_assumption_text(reason):
             continue
         segment = f"{'profit' if source == 'lead_pipeline' else 'research'}_priority_{priority}"
+        if not email:
+            email_status = email_status or "no_valid_email_found"
+            segment = f"{segment}_no_email"
         note_parts = [f"Priority {priority} contact sourced by research agent."]
         if source == "lead_pipeline":
             note_parts = [f"Priority {priority} contact sourced by lead pipeline."]
+        if not email:
+            note_parts.append("No valid email found for this company.")
         score = item.get("score")
         expected_value_usd = item.get("expected_value_usd")
         confidence = item.get("confidence")
@@ -560,18 +643,34 @@ def _upsert_contact_candidates(
         note_parts.insert(1, f"Why selected: {why_selected}")
         personalization_notes = " ".join(note_parts)
 
-        row = (
-            db.query(Contact)
-            .filter(
-                Contact.project_id == project_id,
-                func.lower(Contact.email) == email,
+        if email:
+            row = (
+                db.query(Contact)
+                .filter(
+                    Contact.project_id == project_id,
+                    func.lower(Contact.email) == email,
+                )
+                .order_by(Contact.created_at.desc())
+                .first()
             )
-            .order_by(Contact.created_at.desc())
-            .first()
-        )
+        elif company:
+            # Company-only: match by company name since there's no email.
+            row = (
+                db.query(Contact)
+                .filter(
+                    Contact.project_id == project_id,
+                    Contact.email.is_(None),
+                    func.lower(Contact.company) == company.lower(),
+                )
+                .order_by(Contact.created_at.desc())
+                .first()
+            )
+        else:
+            row = None
+
         if row:
             row.name = name or row.name
-            row.email = email
+            row.email = email or row.email
             row.company = company or row.company
             row.segment = segment
             row.personalization_notes = personalization_notes
@@ -594,6 +693,7 @@ def _upsert_contact_candidates(
                 "id": str(row.id),
                 "name": row.name,
                 "email": row.email,
+                "email_status": email_status or ("valid" if row.email else "no_valid_email_found"),
                 "company": row.company,
                 "segment": row.segment,
                 "source": row.source,
@@ -643,44 +743,74 @@ def _domain_has_mx(domain: str) -> bool:
 
 
 def _filter_verified_contact_candidates(contact_candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Verify contacts and annotate with verification status.
+
+    IMPORTANT: This function never drops entries. It keeps all contacts and
+    annotates them so downstream consumers know the verification status.
+    """
     verified: list[dict[str, Any]] = []
     domain_cache: dict[str, set[str]] = {}
     mx_cache: dict[str, bool] = {}
     for item in contact_candidates:
-        email = str(item.get("email") or "").strip().lower()
-        if not _is_business_email(email):
-            continue
-        domain = email.split("@")[-1]
-        local_part = email.split("@")[0]
-        if domain not in domain_cache:
-            domain_cache[domain] = _extract_public_emails_for_domain(domain)
-        if domain not in mx_cache:
-            mx_cache[domain] = _domain_has_mx(domain)
-        published_emails = domain_cache[domain]
-        if email in published_emails:
+        email = str(item.get("email") or "").strip().lower() or None
+
+        # Pass through company-only entries (no email to verify).
+        if not email:
             verified.append(item)
             continue
-        # Fallback: accept common business role inboxes when domain has MX.
-        if mx_cache[domain] and local_part in ALLOWED_ROLE_LOCAL_PARTS:
-            fallback_item = dict(item)
-            fallback_item["reason"] = (
-                (str(item.get("reason") or "").strip() + " ")
-                + "Verified domain MX; accepted common role inbox."
-            ).strip()
-            verified.append(fallback_item)
+
+        if not _is_business_email(email):
+            # Keep the entry but mark the email as non-business.
+            annotated = dict(item)
+            annotated["email_status"] = "non_business_email"
+            verified.append(annotated)
+            continue
+
+        domain = email.split("@")[-1]
+        if domain not in domain_cache:
+            try:
+                domain_cache[domain] = _extract_public_emails_for_domain(domain)
+            except Exception:  # noqa: BLE001
+                domain_cache[domain] = set()
+        if domain not in mx_cache:
+            try:
+                mx_cache[domain] = _domain_has_mx(domain)
+            except Exception:  # noqa: BLE001
+                mx_cache[domain] = False
+
+        published_emails = domain_cache[domain]
+        annotated = dict(item)
+        if email in published_emails:
+            annotated["email_verified"] = True
+            annotated["email_status"] = "verified_published"
+        elif mx_cache[domain]:
+            annotated["email_verified"] = False
+            annotated["email_status"] = "domain_mx_valid"
+        else:
+            annotated["email_verified"] = False
+            annotated["email_status"] = "unverified"
+        verified.append(annotated)
     return verified
 
 
 def _filter_initial_contact_candidates(contact_candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     initial: list[dict[str, Any]] = []
     for item in contact_candidates:
-        email = str(item.get("email") or "").strip().lower()
+        email = str(item.get("email") or "").strip().lower() or None
+        company = str(item.get("company") or "").strip() or None
         reason = str(item.get("reason") or "").strip()
-        if not _is_business_email(email):
-            continue
         if _is_assumption_text(reason):
             continue
-        initial.append(item)
+        # Keep entries with a valid business email.
+        if email and _is_business_email(email):
+            initial.append(item)
+            continue
+        # Also keep company-only entries (no email or invalid email).
+        if company:
+            demoted = dict(item)
+            demoted["email"] = None
+            demoted["email_status"] = "no_valid_email_found"
+            initial.append(demoted)
     return initial
 
 
@@ -711,8 +841,15 @@ def _run_lead_pipeline_background(
 
         _set_step_status(pipeline_status, step_id="lead_scout", status="in_progress")
         _persist_pipeline_status(db, project_id, pipeline_status)
+        raw_outreach = research_output.get("outreach_contacts", [])
+        logger.info(
+            "lead_pipeline[%s] research_output has %d outreach_contacts",
+            project_id, len(raw_outreach) if isinstance(raw_outreach, list) else 0,
+        )
+        scout_candidates = _fallback_scout_candidates_from_research_output(research_output)
+        logger.info("lead_pipeline[%s] scout produced %d candidates", project_id, len(scout_candidates))
         scout_output = {
-            "candidates": _fallback_scout_candidates_from_research_output(research_output),
+            "candidates": scout_candidates,
             "summary": "Strict fast mode: skipped scout web calls and derived candidates from research output.",
         }
         scout_trace = {
@@ -740,8 +877,10 @@ def _run_lead_pipeline_background(
         _set_step_status(pipeline_status, step_id="lead_enrichment", status="in_progress")
         _persist_pipeline_status(db, project_id, pipeline_status)
         enrichment_fallback_used = True
+        enrichment_leads = _fast_ranked_leads_from_research_output(research_output)
+        logger.info("lead_pipeline[%s] enrichment produced %d leads", project_id, len(enrichment_leads))
         enrichment_output = {
-            "leads": _fast_ranked_leads_from_research_output(research_output),
+            "leads": enrichment_leads,
             "summary": "Strict fast mode: skipped enrichment web calls and derived leads from research output.",
         }
         enrichment_trace = {
@@ -771,10 +910,28 @@ def _run_lead_pipeline_background(
         ranked_leads = [
             lead
             for lead in scored_leads
-            if _is_valid_email(str(lead.get("contact_email") or ""))
+            if (
+                _is_valid_email(str(lead.get("contact_email") or ""))
+                or str(lead.get("company_name") or "").strip()
+            )
             and float(lead.get("confidence") or 0) >= 0.35
             and float(lead.get("profitability_score") or 0) >= 25.0
-        ][:15]
+        ]
+        logger.info(
+            "lead_pipeline[%s] scoring: %d scored -> %d qualified (confidence>=0.35, profitability>=25)",
+            project_id, len(scored_leads), len(ranked_leads),
+        )
+        if scored_leads and not ranked_leads:
+            # Log why leads were filtered out for debugging.
+            for sl in scored_leads[:3]:
+                logger.warning(
+                    "lead_pipeline[%s] filtered out: company=%s confidence=%s profitability=%s email=%s",
+                    project_id,
+                    sl.get("company_name"),
+                    sl.get("confidence"),
+                    sl.get("profitability_score"),
+                    sl.get("contact_email"),
+                )
         _set_step_status(
             pipeline_status,
             step_id="lead_scoring",
@@ -820,8 +977,19 @@ def _run_lead_pipeline_background(
 
         _set_step_status(pipeline_status, step_id="contacts_sync", status="in_progress")
         _persist_pipeline_status(db, project_id, pipeline_status)
-        contact_candidates = _build_combined_contact_candidates(outreach_contacts=[], ranked_leads=ranked_leads)
+        contact_candidates = _build_combined_contact_candidates(
+            outreach_contacts=research_output.get("outreach_contacts", []),
+            ranked_leads=ranked_leads,
+        )
+        logger.info(
+            "lead_pipeline[%s] combined candidates: %d (from %d ranked_leads + research outreach_contacts)",
+            project_id, len(contact_candidates), len(ranked_leads),
+        )
         verified_candidates = _filter_verified_contact_candidates(contact_candidates)
+        logger.info(
+            "lead_pipeline[%s] after verification: %d candidates",
+            project_id, len(verified_candidates),
+        )
         contacts_upserted = _upsert_contact_candidates(
             db=db,
             project_id=project_id,
@@ -850,6 +1018,31 @@ def _run_lead_pipeline_background(
         pipeline_status["completed_at"] = _iso_now()
         pipeline_status["updated_at"] = _iso_now()
         _persist_pipeline_status(db, project_id, pipeline_status)
+
+        # Write a chat message so the user sees pipeline results.
+        email_count = sum(1 for c in contacts_upserted if c.get("email"))
+        company_only_count = sum(1 for c in contacts_upserted if not c.get("email"))
+        parts = [f"Lead pipeline completed. {len(contacts_upserted)} contacts synced."]
+        if email_count:
+            parts.append(f"{email_count} with verified emails.")
+        if company_only_count:
+            parts.append(f"{company_only_count} companies listed without a valid email.")
+        parts.append(f"{len(ranked_leads)} leads ranked by profitability.")
+        db.add(
+            AgentChatMessage(
+                project_id=str(project_id),
+                agent_type="group",
+                role="assistant",
+                content=" ".join(parts),
+                message_metadata={
+                    "source": "lead_pipeline_background",
+                    "contacts_upserted": len(contacts_upserted),
+                    "ranked_leads": len(ranked_leads),
+                },
+            )
+        )
+        db.commit()
+
         BackboardProjectStateService(db).sync_after_action(
             project_id=str(project_id),
             reason="research.lead_pipeline_async",
@@ -864,6 +1057,20 @@ def _run_lead_pipeline_background(
         pipeline_status["status"] = "error"
         pipeline_status["error"] = f"lead_pipeline_failed:{exc}"
         _persist_pipeline_status(db, project_id, pipeline_status)
+        # Notify user of failure via chat.
+        try:
+            db.add(
+                AgentChatMessage(
+                    project_id=str(project_id),
+                    agent_type="group",
+                    role="assistant",
+                    content=f"Lead pipeline failed during {current_stage}: {exc}",
+                    message_metadata={"source": "lead_pipeline_background", "error": True},
+                )
+            )
+            db.commit()
+        except Exception:  # noqa: BLE001
+            pass
     finally:
         db.close()
 
