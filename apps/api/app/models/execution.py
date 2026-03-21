@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -9,6 +9,7 @@ from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 class LaunchPlan(Base, UUIDPrimaryKeyMixin):
     __tablename__ = "launch_plans"
+    __table_args__ = (Index("ix_launch_plans_project_id", "project_id"),)
 
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     positioning_version_id: Mapped[str | None] = mapped_column(ForeignKey("positioning_versions.id"))
@@ -21,6 +22,7 @@ class LaunchPlan(Base, UUIDPrimaryKeyMixin):
 
 class LaunchTask(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "launch_tasks"
+    __table_args__ = (Index("ix_launch_tasks_plan_id", "launch_plan_id"),)
 
     launch_plan_id: Mapped[str] = mapped_column(ForeignKey("launch_plans.id", ondelete="CASCADE"), nullable=False)
     title: Mapped[str] = mapped_column(String, nullable=False)
@@ -32,6 +34,7 @@ class LaunchTask(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
 class Asset(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "assets"
+    __table_args__ = (Index("ix_assets_project_id", "project_id"),)
 
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     asset_type: Mapped[str] = mapped_column(String, nullable=False)
@@ -44,6 +47,11 @@ class Asset(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
 class Contact(Base, UUIDPrimaryKeyMixin):
     __tablename__ = "contacts"
+    __table_args__ = (
+        Index("ix_contacts_project_id", "project_id"),
+        Index("ix_contacts_email", "email"),
+        Index("ix_contacts_project_email", "project_id", "email"),
+    )
 
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str | None] = mapped_column(String)
@@ -57,6 +65,7 @@ class Contact(Base, UUIDPrimaryKeyMixin):
 
 class OutboundBatch(Base, UUIDPrimaryKeyMixin):
     __tablename__ = "outbound_batches"
+    __table_args__ = (Index("ix_outbound_batches_project_id", "project_id"),)
 
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     asset_id: Mapped[str | None] = mapped_column(ForeignKey("assets.id"))
@@ -70,6 +79,7 @@ class OutboundBatch(Base, UUIDPrimaryKeyMixin):
 
 class OutboundMessage(Base, UUIDPrimaryKeyMixin):
     __tablename__ = "outbound_messages"
+    __table_args__ = (Index("ix_outbound_messages_batch_id", "batch_id"),)
 
     batch_id: Mapped[str] = mapped_column(ForeignKey("outbound_batches.id", ondelete="CASCADE"), nullable=False)
     contact_id: Mapped[str] = mapped_column(ForeignKey("contacts.id", ondelete="CASCADE"), nullable=False)

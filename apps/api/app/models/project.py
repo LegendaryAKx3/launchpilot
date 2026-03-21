@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -50,7 +50,10 @@ class ProjectSource(Base, UUIDPrimaryKeyMixin):
 
 class ProjectMemory(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "project_memory"
-    __table_args__ = (UniqueConstraint("project_id", "memory_key", name="uq_project_memory_key"),)
+    __table_args__ = (
+        UniqueConstraint("project_id", "memory_key", name="uq_project_memory_key"),
+        Index("ix_project_memory_project_id", "project_id"),
+    )
 
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     memory_key: Mapped[str] = mapped_column(String, nullable=False)

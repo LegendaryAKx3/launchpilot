@@ -1,7 +1,7 @@
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 
 
 class ExecutionPlanRequest(BaseModel):
@@ -37,12 +37,33 @@ class ContactInput(BaseModel):
 class ContactsUpsertRequest(BaseModel):
     contacts: list[ContactInput]
 
+    @field_validator("contacts")
+    @classmethod
+    def validate_contacts_size(cls, v: list[ContactInput]) -> list[ContactInput]:
+        if len(v) > 1000:
+            raise ValueError("Cannot upsert more than 1000 contacts at once")
+        return v
+
 
 class EmailBatchPrepareRequest(BaseModel):
     subject_line: str | None = None
     max_contacts: int = 10
     advice: str | None = None
     mode: Literal["baseline", "deepen", "retry", "extend"] = "baseline"
+
+    @field_validator("subject_line")
+    @classmethod
+    def validate_subject_line(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 500:
+            raise ValueError("Subject line must be 500 characters or fewer")
+        return v
+
+    @field_validator("max_contacts")
+    @classmethod
+    def validate_max_contacts(cls, v: int) -> int:
+        if v < 1 or v > 500:
+            raise ValueError("max_contacts must be between 1 and 500")
+        return v
 
 
 class EmailBatchSendResponse(BaseModel):
@@ -84,3 +105,10 @@ class DriveWriteRequest(BaseModel):
     content: str
     mime_type: str = "text/plain"
     folder_id: str | None = None
+
+    @field_validator("content")
+    @classmethod
+    def validate_content_size(cls, v: str) -> str:
+        if len(v) > 500_000:
+            raise ValueError("Content must be 500,000 characters or fewer")
+        return v

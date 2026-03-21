@@ -23,7 +23,7 @@ from app.integrations.google_drive_client import GoogleDriveClient
 from app.models.approval import Approval
 from app.models.chat import AgentChatMessage
 from app.models.execution import Asset, Contact, LaunchPlan, LaunchTask, OutboundBatch, OutboundMessage
-from app.routers.utils import success
+from app.routers.utils import safe_commit, success
 from app.schemas.execution import (
     AssetGenerationRequest,
     AssetUpdateRequest,
@@ -55,18 +55,20 @@ def _normalize_email(email: str | None) -> str | None:
 
 
 def _get_current_launch_plan(db: Session, project_id: UUID) -> LaunchPlan | None:
-    plans = (
+    current = (
         db.query(LaunchPlan)
         .filter(LaunchPlan.project_id == project_id)
         .order_by(LaunchPlan.created_at.desc())
-        .all()
+        .first()
     )
-    if not plans:
+    if not current:
         return None
 
-    current = plans[0]
-    for stale_plan in plans[1:]:
-        db.delete(stale_plan)
+    # Clean up stale plans
+    db.query(LaunchPlan).filter(
+        LaunchPlan.project_id == project_id,
+        LaunchPlan.id != current.id,
+    ).delete(synchronize_session=False)
     db.flush()
     return current
 
@@ -228,7 +230,7 @@ def generate_execution_plan(
         next_step_suggestion=output.get("next_step_suggestion"),
     )
 
-    db.commit()
+    safe_commit(db)
     BackboardProjectStateService(db).sync_after_action(
         project_id=str(project_id),
         reason="execution.plan",
@@ -325,7 +327,7 @@ def generate_assets(
         mode=payload.mode,
         next_step_suggestion=output.get("next_step_suggestion"),
     )
-    db.commit()
+    safe_commit(db)
     BackboardProjectStateService(db).sync_after_action(
         project_id=str(project_id),
         reason="execution.assets",
@@ -423,7 +425,7 @@ def generate_distribution_assets(
         None,
         metadata={"agent_trace": trace, "mode": payload.mode, "advice": payload.advice, "count": len(created_assets)},
     )
-    db.commit()
+    safe_commit(db)
     BackboardProjectStateService(db).sync_after_action(
         project_id=str(project_id),
         reason="execution.distribution_assets",
@@ -494,7 +496,7 @@ def generate_image_ad_draft(
         mode=payload.mode,
         next_step_suggestion=output.get("next_step_suggestion"),
     )
-    db.commit()
+    safe_commit(db)
     BackboardProjectStateService(db).sync_after_action(
         project_id=str(project_id),
         reason="execution.image_ad_draft",
@@ -547,7 +549,7 @@ def render_image_ad_asset(
     content["image_url"] = image_url
     content["generated_at"] = datetime.now(timezone.utc).isoformat()
     asset.content = content
-    db.commit()
+    safe_commit(db)
 
     BackboardProjectStateService(db).sync_after_action(
         project_id=str(project_id),
@@ -566,18 +568,27 @@ def upsert_contacts(
     db: Session = Depends(get_db),
 ):
     ProjectService(db).get_project_or_404(project_id)
+
+    # Bulk-fetch existing contacts for this project in one query
+    incoming_emails = [_normalize_email(str(c.email)) for c in payload.contacts]
+    existing_rows = (
+        db.query(Contact)
+        .filter(
+            Contact.project_id == project_id,
+            func.lower(Contact.email).in_([e for e in incoming_emails if e]),
+        )
+        .all()
+    )
+    existing_by_email: dict[str | None, Contact] = {}
+    for row in existing_rows:
+        key = _normalize_email(row.email)
+        if key not in existing_by_email:
+            existing_by_email[key] = row
+
     inserted_ids = []
     for contact in payload.contacts:
         normalized_email = _normalize_email(str(contact.email))
-        row = (
-            db.query(Contact)
-            .filter(
-                Contact.project_id == project_id,
-                func.lower(Contact.email) == normalized_email,
-            )
-            .order_by(Contact.created_at.desc())
-            .first()
-        )
+        row = existing_by_email.get(normalized_email)
         if row:
             row.name = contact.name
             row.email = normalized_email
@@ -595,8 +606,9 @@ def upsert_contacts(
             )
             db.add(row)
             db.flush()
+            existing_by_email[normalized_email] = row
         inserted_ids.append(str(row.id))
-    db.commit()
+    safe_commit(db)
     BackboardProjectStateService(db).sync_after_action(
         project_id=str(project_id),
         reason="execution.contacts",
@@ -759,7 +771,7 @@ def prepare_email_batch(
         next_step_suggestion=output.get("next_step_suggestion"),
     )
 
-    db.commit()
+    safe_commit(db)
     BackboardProjectStateService(db).sync_after_action(
         project_id=str(project_id),
         reason="execution.email_prepare",
@@ -819,7 +831,7 @@ def send_email_batch(
 
     result = ExecutionService(db).send_email_batch(project_id, batch_id)
     AuditService(db).log(project_id, "system", "api", "execution.email_batch_sent", "outbound_batch", str(batch_id))
-    db.commit()
+    safe_commit(db)
     BackboardProjectStateService(db).sync_after_action(
         project_id=str(project_id),
         reason="execution.email_send",
@@ -970,7 +982,7 @@ def update_task(
     if payload.status is not None:
         task.status = payload.status
 
-    db.commit()
+    safe_commit(db)
     return success({"task_id": str(task.id), "updated": True})
 
 
@@ -995,7 +1007,7 @@ def update_asset(
     if payload.status is not None:
         asset.status = payload.status
 
-    db.commit()
+    safe_commit(db)
     return success({"asset_id": str(asset.id), "updated": True})
 
 
@@ -1013,7 +1025,7 @@ def delete_asset(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
 
     db.delete(asset)
-    db.commit()
+    safe_commit(db)
     BackboardProjectStateService(db).sync_after_action(
         project_id=str(project_id),
         reason="execution.asset_deleted",
@@ -1048,7 +1060,7 @@ def update_contact(
     if payload.personalization_notes is not None:
         contact.personalization_notes = payload.personalization_notes
 
-    db.commit()
+    safe_commit(db)
     return success({"contact_id": str(contact.id), "updated": True})
 
 
@@ -1066,7 +1078,7 @@ def delete_contact(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
 
     db.delete(contact)
-    db.commit()
+    safe_commit(db)
     return success({"contact_id": str(contact_id), "deleted": True})
 
 
@@ -1142,7 +1154,7 @@ def write_to_google_drive(
             "folder_id": folder_id,
         },
     )
-    db.commit()
+    safe_commit(db)
     BackboardProjectStateService(db).sync_after_action(
         project_id=str(project_id),
         reason="execution.google_drive_write",

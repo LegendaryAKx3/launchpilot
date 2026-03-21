@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     google_drive_default_folder_id: str | None = None
 
     supabase_db_url: str = Field(default="postgresql+psycopg://postgres:postgres@localhost:5432/postgres")
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
 
     resend_api_key: str | None = None
     resend_from_email: str = "noreply@growthlaunchpad.app"

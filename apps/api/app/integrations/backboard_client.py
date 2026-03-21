@@ -104,13 +104,13 @@ class BackboardClient:
                         **kwargs,
                     )
                     if response.status_code in TRANSIENT_STATUS_CODES and attempt < self.retries:
-                        time.sleep(0.4 * (attempt + 1))
+                        time.sleep(min(0.5 * (2 ** attempt), 10.0))  # exponential backoff, capped at 10s
                         continue
                     return response
             except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
                 last_exc = exc
                 if attempt < self.retries:
-                    time.sleep(0.4 * (attempt + 1))
+                    time.sleep(min(0.5 * (2 ** attempt), 10.0))
                     continue
                 raise BackboardRequestError(
                     f"Backboard request failed after {self.retries + 1} attempts: {exc}"

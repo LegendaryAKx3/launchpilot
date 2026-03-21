@@ -3,7 +3,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -12,7 +12,7 @@ from app.integrations.github_client import GitHubClient
 from app.models.approval import ActivityEvent
 from app.models.project import Project, ProjectBrief, ProjectMemory, ProjectSource
 from app.models.workspace import WorkspaceMember
-from app.routers.utils import success
+from app.routers.utils import safe_commit, success
 from app.schemas.project import ProjectBriefUpsertRequest, ProjectCreateRequest, ProjectSourceCreateRequest
 from app.security.auth0 import CurrentUser, get_current_user
 from app.security.permissions import require_scope
@@ -109,17 +109,20 @@ def list_projects(
     current_user: CurrentUser = Depends(get_current_user),
     _scope: CurrentUser = Depends(require_scope("project:read")),
     db: Session = Depends(get_db),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
 ):
     project_service = ProjectService(db)
     user = project_service.get_or_create_local_user(current_user)
 
-    rows = (
+    query = (
         db.query(Project)
         .join(WorkspaceMember, WorkspaceMember.workspace_id == Project.workspace_id)
         .filter(WorkspaceMember.user_id == user.id)
         .order_by(Project.created_at.desc())
-        .all()
     )
+    total = query.count()
+    rows = query.offset(offset).limit(limit).all()
 
     return success(
         [
@@ -134,7 +137,8 @@ def list_projects(
                 "status": project.status,
             }
             for project in rows
-        ]
+        ],
+        meta={"total": total, "limit": limit, "offset": offset},
     )
 
 
@@ -171,7 +175,7 @@ def create_project(
 
     AuditService(db).log(project.id, "system", None, "project.created", "project", str(project.id))
 
-    db.commit()
+    safe_commit(db)
     BackboardProjectStateService(db).sync_after_action(
         project_id=str(project.id),
         reason="project.create",
@@ -218,7 +222,7 @@ def delete_project(
     db.query(ActivityEvent).filter(ActivityEvent.project_id == project_id).delete()
 
     db.delete(project)
-    db.commit()
+    safe_commit(db)
 
     return success({"deleted": True})
 
@@ -251,7 +255,7 @@ def upsert_project_brief(
             parsed_constraints=payload.parsed_constraints,
         )
         db.add(brief)
-    db.commit()
+    safe_commit(db)
     BackboardProjectStateService(db).sync_after_action(
         project_id=str(project_id),
         reason="project.brief_upsert",
@@ -277,7 +281,7 @@ def add_project_source(
         title=payload.title,
     )
     db.add(source)
-    db.commit()
+    safe_commit(db)
     BackboardProjectStateService(db).sync_after_action(
         project_id=str(project_id),
         reason="project.source_add",

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
-from functools import lru_cache
 
 import httpx
 from fastapi import Depends, Header, HTTPException, status
 from jose import JWTError, jwt
 
 from app.core.config import Settings, get_settings
+
+_JWKS_CACHE_TTL = 3600  # Re-fetch JWKS every hour to handle key rotation
+_jwks_cache: dict[str, tuple[dict, float]] = {}
 
 
 @dataclass(slots=True)
@@ -22,10 +25,15 @@ class CurrentUser:
     raw_claims: dict
 
 
-@lru_cache
-def _jwks_client(jwks_url: str) -> dict:
+def _fetch_jwks(jwks_url: str) -> dict:
+    now = time.monotonic()
+    cached = _jwks_cache.get(jwks_url)
+    if cached and (now - cached[1]) < _JWKS_CACHE_TTL:
+        return cached[0]
     with httpx.Client(timeout=10.0) as client:
-        return client.get(jwks_url).json()
+        data = client.get(jwks_url).json()
+    _jwks_cache[jwks_url] = (data, now)
+    return data
 
 
 def _namespace(settings: Settings) -> str:
@@ -38,13 +46,19 @@ def _decode_token(token: str, settings: Settings) -> dict:
     if not issuer or not audience:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Auth0 is not configured")
 
-    jwks = _jwks_client(f"{issuer.rstrip('/')}/.well-known/jwks.json")
+    jwks_url = f"{issuer.rstrip('/')}/.well-known/jwks.json"
+    jwks = _fetch_jwks(jwks_url)
     try:
         header = jwt.get_unverified_header(token)
         kid = header.get("kid")
         key = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
         if not key:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Signing key not found")
+            # Key not found — maybe keys rotated; invalidate cache and retry once
+            _jwks_cache.pop(jwks_url, None)
+            jwks = _fetch_jwks(jwks_url)
+            key = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
+            if not key:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Signing key not found")
         return jwt.decode(
             token,
             key,

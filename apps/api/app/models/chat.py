@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -9,6 +9,7 @@ from app.models.base import Base, UUIDPrimaryKeyMixin
 
 class AgentChatMessage(Base, UUIDPrimaryKeyMixin):
     __tablename__ = "agent_chat_messages"
+    __table_args__ = (Index("ix_agent_chat_project_agent", "project_id", "agent_type"),)
 
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     agent_type: Mapped[str] = mapped_column(String, nullable=False)  # research, positioning, execution

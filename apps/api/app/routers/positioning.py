@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
@@ -10,7 +10,7 @@ from app.db.session import get_db
 from app.integrations.backboard_client import BackboardRequestError
 from app.models.chat import AgentChatMessage
 from app.models.positioning import PositioningVersion
-from app.routers.utils import success
+from app.routers.utils import safe_commit, success
 from app.schemas.positioning import PositioningRunRequest
 from app.security.auth0 import CurrentUser
 from app.security.permissions import require_scope
@@ -27,6 +27,7 @@ router = APIRouter(prefix="/projects/{project_id}/positioning", tags=["positioni
 def run_positioning(
     project_id: UUID,
     payload: PositioningRunRequest,
+    background_tasks: BackgroundTasks,
     _scope: CurrentUser = Depends(require_scope("positioning:run")),
     db: Session = Depends(get_db),
 ):
@@ -85,8 +86,9 @@ def run_positioning(
         metadata={"agent_trace": trace, "mode": payload.mode, "advice": payload.advice},
     )
 
-    db.commit()
-    BackboardProjectStateService(db).sync_after_action(
+    safe_commit(db)
+    background_tasks.add_task(
+        BackboardProjectStateService(db).sync_after_action,
         project_id=str(project_id),
         reason="positioning.run",
         stage="positioning",
@@ -166,7 +168,7 @@ def select_positioning_version(
         "headline": version.headline,
     }
     upsert_project_memory(db, project_id, "selected_positioning", memory_value, "decision", "user")
-    db.commit()
+    safe_commit(db)
     BackboardProjectStateService(db).sync_after_action(
         project_id=str(project_id),
         reason="positioning.select",

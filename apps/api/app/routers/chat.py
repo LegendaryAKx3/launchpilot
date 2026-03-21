@@ -1,12 +1,12 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.chat import AgentChatMessage
-from app.routers.utils import success
+from app.routers.utils import safe_commit, success
 from app.security.auth0 import CurrentUser
 from app.security.permissions import require_scope
 from app.services.backboard_project_state_service import BackboardProjectStateService
@@ -19,6 +19,13 @@ class ChatMessageCreate(BaseModel):
     role: str
     content: str
     metadata: dict | None = None
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, v: str) -> str:
+        if len(v) > 50_000:
+            raise ValueError("Message content must be 50,000 characters or fewer")
+        return v
 
 
 class ChatMessagesCreate(BaseModel):
@@ -87,7 +94,7 @@ def save_chat_messages(
             "timestamp": message.created_at.isoformat(),
         })
 
-    db.commit()
+    safe_commit(db)
     BackboardProjectStateService(db).sync_after_action(
         project_id=str(project_id),
         reason=f"chat.save.{agent_type}",
@@ -112,7 +119,7 @@ def clear_chat_messages(
         AgentChatMessage.agent_type == agent_type,
     ).delete()
 
-    db.commit()
+    safe_commit(db)
     BackboardProjectStateService(db).sync_after_action(
         project_id=str(project_id),
         reason=f"chat.clear.{agent_type}",

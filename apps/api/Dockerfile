@@ -13,7 +13,7 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 # Copy API source.
 COPY apps/api/ .
 
-EXPOSE 10000
+EXPOSE 8000
 
 # Run migrations on startup, then start API.
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000}"]
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

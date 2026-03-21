@@ -29,10 +29,20 @@ function parseErrorPayload(payload: unknown): ApiErrorPayload | null {
   return null;
 }
 
-// Client-side token fetch
+// Token cache with TTL
+let _cachedToken: string | null = null;
+let _tokenExpiresAt = 0;
+const TOKEN_CACHE_TTL_MS = 55_000; // 55 seconds (tokens typically last 60s+)
+
+// Client-side token fetch with caching
 async function getClientAccessToken(): Promise<string | null> {
   if (typeof window === "undefined") {
     return null;
+  }
+
+  // Return cached token if still valid
+  if (_cachedToken && Date.now() < _tokenExpiresAt) {
+    return _cachedToken;
   }
 
   try {
@@ -41,12 +51,16 @@ async function getClientAccessToken(): Promise<string | null> {
       cache: "no-store"
     });
     if (!response.ok) {
+      _cachedToken = null;
       return null;
     }
 
     const payload = (await response.json()) as { token?: string };
-    return payload.token ?? null;
+    _cachedToken = payload.token ?? null;
+    _tokenExpiresAt = Date.now() + TOKEN_CACHE_TTL_MS;
+    return _cachedToken;
   } catch {
+    _cachedToken = null;
     return null;
   }
 }
@@ -65,6 +79,18 @@ async function getServerAccessToken(): Promise<string | null> {
   }
 }
 
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+function fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  return fetch(url, {
+    ...init,
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timer));
+}
+
 // Client-side API fetch (for use in client components)
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T | null> {
   try {
@@ -77,7 +103,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T |
       headers.set("Authorization", `Bearer ${token}`);
     }
 
-    const response = await fetch(`${env.apiBaseUrl}${path}`, {
+    const response = await fetchWithTimeout(`${env.apiBaseUrl}${path}`, {
       ...init,
       headers,
       cache: "no-store"
@@ -108,7 +134,7 @@ export async function apiFetchWithError<T>(
       headers.set("Authorization", `Bearer ${token}`);
     }
 
-    const response = await fetch(`${env.apiBaseUrl}${path}`, {
+    const response = await fetchWithTimeout(`${env.apiBaseUrl}${path}`, {
       ...init,
       headers,
       cache: "no-store"
@@ -122,7 +148,10 @@ export async function apiFetchWithError<T>(
     }
 
     return { data: (payload?.data as T | undefined) ?? null, error: null, status };
-  } catch {
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      return { data: null, error: { code: "TIMEOUT", message: "Request timed out. Please try again." }, status: null };
+    }
     return { data: null, error: { code: "NETWORK_ERROR", message: "Request failed. Please try again." }, status: null };
   }
 }

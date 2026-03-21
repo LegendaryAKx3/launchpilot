@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.approval import Approval
-from app.routers.utils import success
+from app.routers.utils import safe_commit, success
 from app.schemas.approval import ApprovalDecisionRequest
 from app.security.auth0 import CurrentUser, get_current_user
 from app.security.permissions import require_scope
@@ -69,7 +69,7 @@ def approve(
     if payload.reason:
         approval.reason = payload.reason
 
-    db.commit()
+    safe_commit(db)
     BackboardProjectStateService(db).sync_after_action(
         project_id=str(approval.project_id),
         reason="approval.approve",
@@ -94,7 +94,7 @@ def reject(
     approval.rejected_at = datetime.now(timezone.utc)
     if payload.reason:
         approval.reason = payload.reason
-    db.commit()
+    safe_commit(db)
     BackboardProjectStateService(db).sync_after_action(
         project_id=str(approval.project_id),
         reason="approval.reject",

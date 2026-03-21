@@ -14,6 +14,8 @@ services:
     autoDeploy: true
     healthCheckPath: /v1/health
     envVars:
+      - key: PORT
+        value: "8000"
       - key: AUTH_MODE
         value: dev
       - key: WEB_APP_URL

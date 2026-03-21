@@ -3,6 +3,7 @@ import { ReactNode } from "react";
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/layout/app-shell";
+import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { auth0 } from "@/lib/auth0";
 
 export default async function ProtectedLayout({ children }: { children: ReactNode }) {
@@ -15,5 +16,9 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
     redirect("/login");
   }
 
-  return <AppShell>{children}</AppShell>;
+  return (
+    <AppShell>
+      <ErrorBoundary>{children}</ErrorBoundary>
+    </AppShell>
+  );
 }

@@ -2,8 +2,11 @@ import { Message } from "@/components/chat/chat-message";
 
 export const LOCAL_MESSAGE_ID_PREFIX = "local:";
 
+let _localSeq = 0;
+
 export function createLocalMessageId(role: Message["role"]): string {
-  return `${LOCAL_MESSAGE_ID_PREFIX}${role}:${crypto.randomUUID()}`;
+  _localSeq += 1;
+  return `${LOCAL_MESSAGE_ID_PREFIX}${role}:${_localSeq}:${crypto.randomUUID()}`;
 }
 
 export function isLocalMessageId(id: string): boolean {
@@ -18,19 +21,23 @@ export function mergeSavedMessages(previous: Message[], persisted: Array<{ id: s
     timestamp: new Date(message.timestamp),
   }));
 
+  // Track which saved messages have been matched so we don't double-match
+  const matched = new Set<number>();
+
   return previous.map((message) => {
     if (!isLocalMessageId(message.id)) {
       return message;
     }
 
+    // Match by role, content, AND sequence order to avoid merging duplicates
     const nextSavedIndex = savedQueue.findIndex(
-      (saved) => saved.role === message.role && saved.content === message.content,
+      (saved, idx) => !matched.has(idx) && saved.role === message.role && saved.content === message.content,
     );
     if (nextSavedIndex === -1) {
       return message;
     }
 
-    const [saved] = savedQueue.splice(nextSavedIndex, 1);
-    return saved;
+    matched.add(nextSavedIndex);
+    return savedQueue[nextSavedIndex];
   });
 }

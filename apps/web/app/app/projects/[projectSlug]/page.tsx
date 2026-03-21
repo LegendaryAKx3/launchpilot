@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 
 import { serverApiFetch } from "@/lib/api";
 
@@ -68,6 +69,10 @@ export default async function ProjectOverviewPage({ params }: { params: Promise<
   // Fetch project data
   const projects = (await serverApiFetch<Project[]>("/projects")) ?? [];
   const project = projects.find((p) => p.slug === projectSlug);
+
+  if (!project) {
+    notFound();
+  }
 
   // Fetch all related data if project exists
   const [memory, activity, research, positioningData, execution] = project

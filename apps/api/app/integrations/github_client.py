@@ -25,6 +25,8 @@ class GitHubClient:
             response.raise_for_status()
             repos = response.json()
 
+        if not isinstance(repos, list):
+            return []
         return [
             {
                 "id": repo.get("id"),

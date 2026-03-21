@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -9,6 +9,7 @@ from app.models.base import Base, UUIDPrimaryKeyMixin
 
 class Approval(Base, UUIDPrimaryKeyMixin):
     __tablename__ = "approvals"
+    __table_args__ = (Index("ix_approvals_project_id", "project_id"),)
 
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     action_type: Mapped[str] = mapped_column(String, nullable=False)
@@ -28,6 +29,7 @@ class Approval(Base, UUIDPrimaryKeyMixin):
 
 class ActivityEvent(Base, UUIDPrimaryKeyMixin):
     __tablename__ = "activity_events"
+    __table_args__ = (Index("ix_activity_events_project_id", "project_id"),)
 
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     actor_type: Mapped[str] = mapped_column(String, nullable=False)

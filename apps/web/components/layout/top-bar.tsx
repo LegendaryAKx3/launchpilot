@@ -21,17 +21,6 @@ export function TopBar() {
         <span className="text-sm font-semibold text-fg-primary">LaunchPilot</span>
       </Link>
 
-      {/* Command Palette Trigger */}
-      <button className="hidden items-center gap-2 rounded-lg border border-edge-subtle bg-surface-muted px-3 py-1.5 text-sm text-fg-muted transition-colors hover:border-edge-muted hover:text-fg-secondary md:flex">
-        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-        </svg>
-        <span>Search...</span>
-        <kbd className="ml-2 rounded bg-surface-elevated px-1.5 py-0.5 font-mono text-xs text-fg-faint">
-          <span className="text-2xs">&#8984;</span>K
-        </kbd>
-      </button>
-
       {/* Navigation */}
       <nav className="flex items-center gap-2">
         <Link
