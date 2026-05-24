@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
@@ -27,7 +27,6 @@ router = APIRouter(prefix="/projects/{project_id}/positioning", tags=["positioni
 def run_positioning(
     project_id: UUID,
     payload: PositioningRunRequest,
-    background_tasks: BackgroundTasks,
     _scope: CurrentUser = Depends(require_scope("positioning:run")),
     db: Session = Depends(get_db),
 ):
@@ -87,8 +86,7 @@ def run_positioning(
     )
 
     safe_commit(db)
-    background_tasks.add_task(
-        BackboardProjectStateService(db).sync_after_action,
+    BackboardProjectStateService(db).sync_after_action(
         project_id=str(project_id),
         reason="positioning.run",
         stage="positioning",

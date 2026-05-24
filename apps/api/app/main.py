@@ -17,7 +17,7 @@ settings = get_settings()
 if settings.auth_mode == "auth0" and (not settings.auth0_issuer or not settings.auth0_audience):
     raise RuntimeError("AUTH_MODE=auth0 requires AUTH0_ISSUER and AUTH0_AUDIENCE.")
 if not settings.backboard_api_key:
-    raise RuntimeError("BACKBOARD_API_KEY is required for the finalized agent pipeline.")
+    logger.warning("BACKBOARD_API_KEY is not set — agent pipeline calls will be skipped.")
 
 # Startup configuration summary
 logger.info("Starting %s (env=%s, auth=%s)", settings.app_name, settings.app_env, settings.auth_mode)
@@ -33,11 +33,11 @@ app.add_middleware(
     allow_origins=[settings.web_app_url, "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
+    allow_headers=["*"],
 )
 
 # Rate limiting
-app.add_middleware(RateLimitMiddleware, requests_per_minute=60)
+app.add_middleware(RateLimitMiddleware, requests_per_minute=200)
 
 
 @app.middleware("http")
