@@ -16,6 +16,10 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # 0001 creates every table from the current models, so this table already
+    # exists on a fresh database. Only create it when upgrading an older DB.
+    if sa.inspect(op.get_bind()).has_table("agent_chat_messages"):
+        return
     op.create_table(
         "agent_chat_messages",
         sa.Column("id", sa.Uuid(), nullable=False),
