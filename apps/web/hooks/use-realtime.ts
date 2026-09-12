@@ -21,7 +21,7 @@ export function useRealtimeChannel(channel: string, onEvent: (payload: unknown) 
 
     let isCancelled = false;
 
-    function subscribe() {
+    const subscribe = () => {
       const subscription = client
         .channel(channel)
         .on("postgres_changes", { event: "*", schema: "public" }, (payload) => onEventRef.current(payload))
@@ -42,7 +42,7 @@ export function useRealtimeChannel(channel: string, onEvent: (payload: unknown) 
         });
 
       return subscription;
-    }
+    };
 
     const sub = subscribe();
 

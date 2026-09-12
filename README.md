@@ -99,6 +99,11 @@ This starts:
 
 Note: frontend is not run by Docker Compose in this repo.
 
+## Cloud deployment
+
+Both apps deploy to Vercel as two projects from this repo (frontend from `apps/web`, API from `apps/api`).
+See [`DEPLOY_VERCEL_FULLSTACK.md`](DEPLOY_VERCEL_FULLSTACK.md).
+
 ## Auth modes
 
 ### Dev mode (fastest)
