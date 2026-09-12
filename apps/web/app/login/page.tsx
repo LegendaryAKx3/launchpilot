@@ -50,7 +50,11 @@ export default function LoginPage() {
                   />
                 </svg>
                 <span>
-                  Auth0 is not configured. Add web auth vars in <code className="rounded bg-surface-elevated px-1">apps/web/.env.local</code> and restart.{" "}
+                  Auth0 is not configured, so sign-in is disabled.{" "}
+                  <Link href="/app/projects" className="font-medium underline">
+                    Continue without signing in
+                  </Link>
+                  .{" "}
                   {authConfigError ? <span className="block pt-1 text-amber-700 dark:text-amber-300">{authConfigError}</span> : null}
                 </span>
               </div>

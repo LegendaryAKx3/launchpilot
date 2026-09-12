@@ -5,7 +5,7 @@ import { isAuthEnabled } from "@/lib/auth0";
 
 export default function LandingPage() {
   const authEnabled = isAuthEnabled();
-  const primaryHref = "/auth/login?returnTo=%2Fapp%2Fprojects";
+  const primaryHref = authEnabled ? "/auth/login?returnTo=%2Fapp%2Fprojects" : "/app/projects";
 
   return (
     <main className="relative mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-10">

@@ -7,13 +7,13 @@ import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { auth0 } from "@/lib/auth0";
 
 export default async function ProtectedLayout({ children }: { children: ReactNode }) {
-  if (!auth0) {
-    redirect("/login");
-  }
-
-  const session = await auth0.getSession();
-  if (!session) {
-    redirect("/login");
+  // With Auth0 unconfigured the API runs in dev mode with a fallback user,
+  // so let the app through instead of bouncing to a login page that cannot work.
+  if (auth0) {
+    const session = await auth0.getSession();
+    if (!session) {
+      redirect("/login");
+    }
   }
 
   return (
