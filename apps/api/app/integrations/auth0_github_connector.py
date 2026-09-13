@@ -11,9 +11,8 @@ class Auth0GithubConnector:
     def __init__(self) -> None:
         self.settings = get_settings()
         self.domain = (self.settings.auth0_domain or "").strip() or self._domain_from_issuer()
-        self.management_audience = (
-            self.settings.auth0_management_audience
-            or (f"https://{self.domain}/api/v2/" if self.domain else None)
+        self.management_audience = self.settings.auth0_management_audience or (
+            f"https://{self.domain}/api/v2/" if self.domain else None
         )
         self._management_token_cache: str | None = None
 

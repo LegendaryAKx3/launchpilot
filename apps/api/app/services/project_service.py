@@ -23,7 +23,10 @@ class ProjectService:
         base = self.slugify(name)
         slug = base
         suffix = 2
-        while self.db.query(Project).filter(Project.workspace_id == workspace_id, Project.slug == slug).first() is not None:
+        while (
+            self.db.query(Project).filter(Project.workspace_id == workspace_id, Project.slug == slug).first()
+            is not None
+        ):
             slug = f"{base}-{suffix}"
             suffix += 1
         return slug

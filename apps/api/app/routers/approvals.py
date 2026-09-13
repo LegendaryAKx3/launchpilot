@@ -21,12 +21,7 @@ def list_approvals(
     _scope: CurrentUser = Depends(require_scope("approval:read")),
     db: Session = Depends(get_db),
 ):
-    approvals = (
-        db.query(Approval)
-        .filter(Approval.project_id == project_id)
-        .order_by(Approval.created_at.desc())
-        .all()
-    )
+    approvals = db.query(Approval).filter(Approval.project_id == project_id).order_by(Approval.created_at.desc()).all()
     return success(
         [
             {

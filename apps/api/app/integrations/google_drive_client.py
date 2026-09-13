@@ -59,4 +59,3 @@ class GoogleDriveClient:
                 "mimeType": data.get("mimeType"),
                 "webViewLink": web_view_link,
             }
-

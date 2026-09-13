@@ -5,15 +5,12 @@ from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID
 
-logger = logging.getLogger(__name__)
-
 import dns.resolver
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import delete, func
 from sqlalchemy.orm import Session
 
-from app.agents.lead_pipeline_agent import run_lead_enrichment_agent, run_lead_scout_agent
 from app.agents.research_agent import run_research_agent
 from app.agents.shared_context import build_project_context
 from app.db.session import SessionLocal, get_db
@@ -34,6 +31,8 @@ from app.services.contact_sanitizer import name_looks_like_role, sanitize_contac
 from app.services.lead_scoring_service import score_enriched_leads
 from app.services.memory_service import upsert_project_memory
 from app.services.project_service import ProjectService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects/{project_id}/research", tags=["research"])
 TEXT_FILE_EXTENSIONS = {
@@ -162,7 +161,9 @@ def _build_verified_github_context(
             detail={"code": "GITHUB_VERIFY_FAILED", "message": "Failed verifying repository path with GitHub."},
         ) from exc
 
-    file_entries = [entry for entry in entries if entry.get("type") == "file" and _is_text_candidate(entry.get("path", ""))]
+    file_entries = [
+        entry for entry in entries if entry.get("type") == "file" and _is_text_candidate(entry.get("path", ""))
+    ]
     selected_files = file_entries[:max_files]
     file_snippets: list[dict[str, Any]] = []
     for entry in selected_files:
@@ -417,7 +418,9 @@ def _fallback_enriched_leads_from_scout(candidates: list[dict[str, Any]]) -> lis
                         or "ASSUMPTION: Candidate aligns with ICP and likely has current buying trigger."
                     ),
                     "personalization_angle": "Reference current initiatives and offer a focused pilot.",
-                    "evidence_urls": candidate.get("evidence_urls") if isinstance(candidate.get("evidence_urls"), list) else [],
+                    "evidence_urls": candidate.get("evidence_urls")
+                    if isinstance(candidate.get("evidence_urls"), list)
+                    else [],
                     "fallback_generated": True,
                 }
             )
@@ -825,7 +828,6 @@ def _run_lead_pipeline_background(
     db = SessionLocal()
     pipeline_status = _new_pipeline_status(mode=mode, advice=advice)
     try:
-        backboard = BackboardStageService(db)
         _set_step_status(
             pipeline_status,
             step_id="research_analysis",
@@ -844,7 +846,8 @@ def _run_lead_pipeline_background(
         raw_outreach = research_output.get("outreach_contacts", [])
         logger.info(
             "lead_pipeline[%s] research_output has %d outreach_contacts",
-            project_id, len(raw_outreach) if isinstance(raw_outreach, list) else 0,
+            project_id,
+            len(raw_outreach) if isinstance(raw_outreach, list) else 0,
         )
         scout_candidates = _fallback_scout_candidates_from_research_output(research_output)
         logger.info("lead_pipeline[%s] scout produced %d candidates", project_id, len(scout_candidates))
@@ -910,16 +913,15 @@ def _run_lead_pipeline_background(
         ranked_leads = [
             lead
             for lead in scored_leads
-            if (
-                _is_valid_email(str(lead.get("contact_email") or ""))
-                or str(lead.get("company_name") or "").strip()
-            )
+            if (_is_valid_email(str(lead.get("contact_email") or "")) or str(lead.get("company_name") or "").strip())
             and float(lead.get("confidence") or 0) >= 0.35
             and float(lead.get("profitability_score") or 0) >= 25.0
         ]
         logger.info(
             "lead_pipeline[%s] scoring: %d scored -> %d qualified (confidence>=0.35, profitability>=25)",
-            project_id, len(scored_leads), len(ranked_leads),
+            project_id,
+            len(scored_leads),
+            len(ranked_leads),
         )
         if scored_leads and not ranked_leads:
             # Log why leads were filtered out for debugging.
@@ -983,12 +985,15 @@ def _run_lead_pipeline_background(
         )
         logger.info(
             "lead_pipeline[%s] combined candidates: %d (from %d ranked_leads + research outreach_contacts)",
-            project_id, len(contact_candidates), len(ranked_leads),
+            project_id,
+            len(contact_candidates),
+            len(ranked_leads),
         )
         verified_candidates = _filter_verified_contact_candidates(contact_candidates)
         logger.info(
             "lead_pipeline[%s] after verification: %d candidates",
-            project_id, len(verified_candidates),
+            project_id,
+            len(verified_candidates),
         )
         contacts_upserted = _upsert_contact_candidates(
             db=db,
@@ -1030,7 +1035,7 @@ def _run_lead_pipeline_background(
         parts.append(f"{len(ranked_leads)} leads ranked by profitability.")
         db.add(
             AgentChatMessage(
-                project_id=str(project_id),
+                project_id=project_id,
                 agent_type="group",
                 role="assistant",
                 content=" ".join(parts),
@@ -1061,7 +1066,7 @@ def _run_lead_pipeline_background(
         try:
             db.add(
                 AgentChatMessage(
-                    project_id=str(project_id),
+                    project_id=project_id,
                     agent_type="group",
                     role="assistant",
                     content=f"Lead pipeline failed during {current_stage}: {exc}",
@@ -1354,7 +1359,7 @@ def run_research(
     if output.get("chat_message"):
         db.add(
             AgentChatMessage(
-                project_id=str(project_id),
+                project_id=project_id,
                 agent_type="research",
                 role="assistant",
                 content=str(output.get("chat_message") or ""),

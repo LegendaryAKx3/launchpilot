@@ -81,7 +81,10 @@ def _verify_github_repo_for_user(current_user: CurrentUser, repo_input: str) -> 
     if not token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"code": "GITHUB_NOT_LINKED", "message": "Link your GitHub account before using repository validation."},
+            detail={
+                "code": "GITHUB_NOT_LINKED",
+                "message": "Link your GitHub account before using repository validation.",
+            },
         )
 
     try:

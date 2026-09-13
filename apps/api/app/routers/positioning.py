@@ -62,7 +62,7 @@ def run_positioning(
     if output.get("chat_message"):
         db.add(
             AgentChatMessage(
-                project_id=str(project_id),
+                project_id=project_id,
                 agent_type="positioning",
                 role="assistant",
                 content=str(output.get("chat_message") or ""),

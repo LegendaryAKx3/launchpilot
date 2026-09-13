@@ -40,11 +40,7 @@ def github_link_url(
     # This uses the existing Auth0 route handler in the web app.
     return_to = quote("/app/settings/security", safe="")
     github_scope = quote("repo,user:email", safe="")
-    link_url = (
-        f"{app_url}/auth/login?connection=github"
-        f"&connection_scope={github_scope}"
-        f"&returnTo={return_to}"
-    )
+    link_url = f"{app_url}/auth/login?connection=github&connection_scope={github_scope}&returnTo={return_to}"
     return success({"url": link_url})
 
 

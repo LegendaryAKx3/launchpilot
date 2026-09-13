@@ -51,18 +51,20 @@ def get_chat_messages(
         .all()
     )
 
-    return success({
-        "messages": [
-            {
-                "id": str(m.id),
-                "role": m.role,
-                "content": m.content,
-                "metadata": m.message_metadata,
-                "timestamp": m.created_at.isoformat(),
-            }
-            for m in messages
-        ]
-    })
+    return success(
+        {
+            "messages": [
+                {
+                    "id": str(m.id),
+                    "role": m.role,
+                    "content": m.content,
+                    "metadata": m.message_metadata,
+                    "timestamp": m.created_at.isoformat(),
+                }
+                for m in messages
+            ]
+        }
+    )
 
 
 @router.post("/{agent_type}")
@@ -86,13 +88,15 @@ def save_chat_messages(
         )
         db.add(message)
         db.flush()
-        saved.append({
-            "id": str(message.id),
-            "role": message.role,
-            "content": message.content,
-            "metadata": message.message_metadata,
-            "timestamp": message.created_at.isoformat(),
-        })
+        saved.append(
+            {
+                "id": str(message.id),
+                "role": message.role,
+                "content": message.content,
+                "metadata": message.message_metadata,
+                "timestamp": message.created_at.isoformat(),
+            }
+        )
 
     safe_commit(db)
     BackboardProjectStateService(db).sync_after_action(

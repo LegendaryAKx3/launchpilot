@@ -2,6 +2,7 @@ import uuid
 import os
 import sys
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
@@ -17,6 +18,15 @@ from app.main import app
 from app.models.base import Base
 from app.models.execution import Contact
 from app.models.project import Project
+
+
+@pytest.fixture(autouse=True)
+def stub_backboard_project_state_sync(monkeypatch):
+    # The Backboard sync runs inside request handlers and needs network access
+    # plus Postgres-only SQL; keep it out of the SQLite smoke tests.
+    monkeypatch.setattr(
+        project_state_service.BackboardProjectStateService, "sync_after_action", lambda *args, **kwargs: {"ok": True}
+    )
 
 
 def build_test_client():

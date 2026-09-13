@@ -73,7 +73,7 @@ export function ContactDrawer({ contact, isOpen, onClose, onSave, onDelete }: Co
           {showDeleteConfirm ? (
             <div className="w-full rounded-lg border border-red-500/30 bg-red-500/5 p-4">
               <p className="text-sm font-medium text-red-400">
-                Delete "{contact?.name || contact?.email}"?
+                Delete &quot;{contact?.name || contact?.email}&quot;?
               </p>
               <p className="mt-1 text-sm text-fg-muted">
                 This action cannot be undone. The contact and its outreach references will be removed.

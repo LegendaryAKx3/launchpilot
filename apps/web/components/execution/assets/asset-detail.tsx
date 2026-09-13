@@ -149,7 +149,7 @@ export function AssetDetail({ asset, onSave, onStatusChange, onDelete, onSaveToD
       {showDeleteConfirm && (
         <div className="mx-6 mt-4 rounded-lg border border-red-500/30 bg-red-500/5 p-4">
           <p className="text-sm font-medium text-red-400">
-            Delete "{asset.title || assetTypeLabels[asset.asset_type] || asset.asset_type}"?
+            Delete &quot;{asset.title || assetTypeLabels[asset.asset_type] || asset.asset_type}&quot;?
           </p>
           <p className="mt-1 text-sm text-fg-muted">
             This action cannot be undone. Asset content and prompt data will be permanently removed.

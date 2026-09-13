@@ -57,28 +57,70 @@ def _normalize_tasks(raw_tasks: list | None, context: dict) -> list[dict]:
     project_name = _project_name(context)
     fallbacks_by_day = {
         1: [
-            ("Finalize landing page copy", f"Review headline, subhead, and CTA for {project_name}. Ensure value prop is clear in first 5 seconds. Test on 3 people who don't know the product."),
-            ("Set up analytics and tracking", "Install analytics (Plausible/GA4), set up conversion funnels for signup flow, test that all events fire correctly."),
-            ("Create launch announcement draft", "Write 3 subject line variations for launch email, draft body copy, prep for internal review."),
+            (
+                "Finalize landing page copy",
+                f"Review headline, subhead, and CTA for {project_name}. Ensure value prop is clear in first 5 seconds. Test on 3 people who don't know the product.",
+            ),
+            (
+                "Set up analytics and tracking",
+                "Install analytics (Plausible/GA4), set up conversion funnels for signup flow, test that all events fire correctly.",
+            ),
+            (
+                "Create launch announcement draft",
+                "Write 3 subject line variations for launch email, draft body copy, prep for internal review.",
+            ),
         ],
         2: [
-            ("Record short-form video content", "Film 3 TikTok/Reels variations of main value prop. Each under 60 seconds, test different hooks."),
-            ("Write cold outreach templates", "Create 3 DM templates and 2 email templates targeting different audience segments."),
-            ("Design social proof graphics", "Create quote cards from beta testers, before/after metrics visuals if available."),
+            (
+                "Record short-form video content",
+                "Film 3 TikTok/Reels variations of main value prop. Each under 60 seconds, test different hooks.",
+            ),
+            (
+                "Write cold outreach templates",
+                "Create 3 DM templates and 2 email templates targeting different audience segments.",
+            ),
+            (
+                "Design social proof graphics",
+                "Create quote cards from beta testers, before/after metrics visuals if available.",
+            ),
         ],
         3: [
-            ("Build target contact list", "Identify 50 relevant accounts to reach out to. Document why each is a fit and personalization notes."),
-            ("Send first batch of DMs", "Send 20 personalized cold DMs using templates from Day 2. Track response rates."),
-            ("Prep launch platform assets", "Tagline, description, first comment, maker story for Product Hunt or similar."),
+            (
+                "Build target contact list",
+                "Identify 50 relevant accounts to reach out to. Document why each is a fit and personalization notes.",
+            ),
+            (
+                "Send first batch of DMs",
+                "Send 20 personalized cold DMs using templates from Day 2. Track response rates.",
+            ),
+            (
+                "Prep launch platform assets",
+                "Tagline, description, first comment, maker story for Product Hunt or similar.",
+            ),
         ],
         4: [
-            ("Execute soft launch", "Send first email wave to warm list, announce on primary social channel, monitor initial response."),
-            ("Track initial metrics", "Document open rates, click rates, replies, signups. Note qualitative feedback patterns."),
-            ("Engage with early responses", "Reply to all comments and DMs within 2 hours. Capture testimonials from happy early users."),
+            (
+                "Execute soft launch",
+                "Send first email wave to warm list, announce on primary social channel, monitor initial response.",
+            ),
+            (
+                "Track initial metrics",
+                "Document open rates, click rates, replies, signups. Note qualitative feedback patterns.",
+            ),
+            (
+                "Engage with early responses",
+                "Reply to all comments and DMs within 2 hours. Capture testimonials from happy early users.",
+            ),
         ],
         5: [
-            ("Analyze Day 4 results", "Review all metrics, identify what's working vs not. Document specific insights for iteration."),
-            ("Iterate on creative", "Adjust copy, visuals, and hooks based on response patterns. Create v2 of underperforming assets."),
+            (
+                "Analyze Day 4 results",
+                "Review all metrics, identify what's working vs not. Document specific insights for iteration.",
+            ),
+            (
+                "Iterate on creative",
+                "Adjust copy, visuals, and hooks based on response patterns. Create v2 of underperforming assets.",
+            ),
             ("Send follow-up messages", "Follow up with non-responders from Day 3-4 outreach using different angle."),
         ],
         6: [
@@ -87,9 +129,18 @@ def _normalize_tasks(raw_tasks: list | None, context: dict) -> list[dict]:
             ("Collect and share wins", "Screenshot positive feedback, create case study draft from best early result."),
         ],
         7: [
-            ("Compile final metrics report", "Document all KPIs: signups, conversion rates, engagement, revenue if applicable."),
-            ("Conduct post-launch review", "What worked, what didn't, what to double down on. Write key learnings doc."),
-            ("Decide next phase", "Based on results: scale winning channels, iterate on weak spots, or pivot approach."),
+            (
+                "Compile final metrics report",
+                "Document all KPIs: signups, conversion rates, engagement, revenue if applicable.",
+            ),
+            (
+                "Conduct post-launch review",
+                "What worked, what didn't, what to double down on. Write key learnings doc.",
+            ),
+            (
+                "Decide next phase",
+                "Based on results: scale winning channels, iterate on weak spots, or pivot approach.",
+            ),
         ],
     }
 
@@ -332,7 +383,9 @@ def run_image_ad_prompt_agent(
         project_name = project.get("name") or "the product"
         audience = brief.get("audience") or selected_positioning.get("icp") or "the core target users"
         problem = brief.get("problem") or "a clear recurring user pain point"
-        wedge = selected_positioning.get("wedge") or (wedges[0].get("label") if wedges else "a differentiated positioning wedge")
+        wedge = selected_positioning.get("wedge") or (
+            wedges[0].get("label") if wedges else "a differentiated positioning wedge"
+        )
         headline = selected_positioning.get("headline") or f"{project_name}: {wedge}"
         primary_pain = pains[0].get("label") if pains else "friction in the current workflow"
 
@@ -426,7 +479,9 @@ def _normalize_distribution_assets(raw_assets: list | None, context: dict) -> li
 
         variation = str(item.get("variation_label") or "A").strip().upper()
         hook_angle = str(item.get("hook_angle") or "").strip()
-        title = str(item.get("title") or "").strip() or f"{asset_type.replace('_', ' ').title()} - Variation {variation}"
+        title = (
+            str(item.get("title") or "").strip() or f"{asset_type.replace('_', ' ').title()} - Variation {variation}"
+        )
 
         content = item.get("content")
         if not isinstance(content, dict):
@@ -442,14 +497,16 @@ def _normalize_distribution_assets(raw_assets: list | None, context: dict) -> li
         if asset_type == "video_script" and not content.get("script"):
             continue
 
-        assets.append({
-            "asset_type": asset_type,
-            "channel": channel,
-            "variation_label": variation,
-            "hook_angle": hook_angle,
-            "title": title,
-            "content": content,
-        })
+        assets.append(
+            {
+                "asset_type": asset_type,
+                "channel": channel,
+                "variation_label": variation,
+                "hook_angle": hook_angle,
+                "title": title,
+                "content": content,
+            }
+        )
 
     return assets
 
@@ -513,7 +570,6 @@ def run_distribution_assets_agent(
     assets = _normalize_distribution_assets(response.get("assets"), context)
 
     # Build fallback assets if agent didn't produce enough
-    project_name = _project_name(context)
     if len(assets) < len(channel_list):
         fallback_assets = _build_fallback_distribution_assets(context, channel_list, variations_per_channel)
         existing_types = {(a["asset_type"], a.get("variation_label", "A")) for a in assets}
@@ -526,9 +582,11 @@ def run_distribution_assets_agent(
         "recommended_channels": response.get("recommended_channels") or channel_list,
         "channel_reasoning": response.get("channel_reasoning") or "",
         "assets": assets,
-        "testing_strategy": response.get("testing_strategy") or "Test each variation with equal traffic splits for 48 hours, then double down on winners.",
+        "testing_strategy": response.get("testing_strategy")
+        or "Test each variation with equal traffic splits for 48 hours, then double down on winners.",
         "chat_message": response.get("chat_message") or f"Generated {len(assets)} distribution asset variations.",
-        "next_step_suggestion": response.get("next_step_suggestion") or "Review the variations and pick your favorites to start testing.",
+        "next_step_suggestion": response.get("next_step_suggestion")
+        or "Review the variations and pick your favorites to start testing.",
     }
 
     return normalized, {
@@ -568,12 +626,12 @@ def _build_fallback_distribution_assets(context: dict, channels: list[str], vari
                 "title": "Cold Email - Pain Point Lead",
                 "content": {
                     "subject": f"quick question about {primary_pain[:30]}",
-                    "preview_text": f"noticed you're dealing with this too",
+                    "preview_text": "noticed you're dealing with this too",
                     "body": f"Been seeing a lot of {audience} mention {primary_pain} lately.\n\nWe built something that fixes this in about 5 minutes - curious if that's even on your radar right now?\n\nNo pitch, just genuinely wondering if this is still a problem worth solving.",
                     "cta": "Worth a quick look?",
                     "follow_up_1": f"Hey - circling back on this. Still curious if {primary_pain} is something you're actively trying to solve.\n\nHappy to share what's been working for others in your space.",
-                    "follow_up_2": f"Last try on this - if {primary_pain} isn't a priority right now, totally get it. Just let me know and I'll stop bugging you."
-                }
+                    "follow_up_2": f"Last try on this - if {primary_pain} isn't a priority right now, totally get it. Just let me know and I'll stop bugging you.",
+                },
             },
             {
                 "variation_label": "B",
@@ -585,8 +643,8 @@ def _build_fallback_distribution_assets(context: dict, channels: list[str], vari
                     "body": f"Just helped another {audience} cut their {primary_pain} time by 80%.\n\nThey were skeptical too - but the results were hard to argue with.\n\nWant me to share what we did differently?",
                     "cta": "Interested?",
                     "follow_up_1": f"Quick follow-up - the approach I mentioned has been working really well for teams dealing with {primary_pain}.\n\nHappy to walk through it if useful.",
-                    "follow_up_2": "Closing the loop - if this isn't relevant right now, no worries at all. Just wanted to make sure you had the option."
-                }
+                    "follow_up_2": "Closing the loop - if this isn't relevant right now, no worries at all. Just wanted to make sure you had the option.",
+                },
             },
             {
                 "variation_label": "C",
@@ -598,9 +656,9 @@ def _build_fallback_distribution_assets(context: dict, channels: list[str], vari
                     "body": f"Most {audience} try to solve {primary_pain} by throwing more tools at it.\n\nThat's backwards.\n\nWe found the real fix is actually simpler - and it takes about 5 minutes.\n\nWant to see what I mean?",
                     "cta": "Curious?",
                     "follow_up_1": f"Hey - that contrarian take on {primary_pain} I mentioned? Turns out it's working better than expected.\n\nHappy to share the details if you're curious.",
-                    "follow_up_2": "Last note on this - if you're solving this differently now, I'd actually love to hear what's working. Always learning."
-                }
-            }
+                    "follow_up_2": "Last note on this - if you're solving this differently now, I'd actually love to hear what's working. Always learning.",
+                },
+            },
         ]
         for ev in email_variations[:variations]:
             ev["asset_type"] = "cold_email"
@@ -617,8 +675,8 @@ def _build_fallback_distribution_assets(context: dict, channels: list[str], vari
                     "platform": "twitter",
                     "message": f"Your take on [specific thing they posted] was interesting - especially re: {primary_pain}. Quick q: is that still the main blocker you're seeing?",
                     "follow_up": f"Hey - no reply needed if you're slammed. Was genuinely curious about the {primary_pain} thing. Seeing it come up a lot lately.",
-                    "reply_handling": "If they engage: share one specific insight. If objection: acknowledge and ask what IS working for them."
-                }
+                    "reply_handling": "If they engage: share one specific insight. If objection: acknowledge and ask what IS working for them.",
+                },
             },
             {
                 "variation_label": "B",
@@ -628,8 +686,8 @@ def _build_fallback_distribution_assets(context: dict, channels: list[str], vari
                     "platform": "linkedin",
                     "message": f"Found this while researching {primary_pain} solutions - thought of you based on your recent post. No pitch, just thought it might be useful: [specific insight or resource]",
                     "follow_up": "Hey - hope that was helpful. If you're actively working on this, happy to share a few more things that have been working.",
-                    "reply_handling": "If interested: offer a quick call or async exchange. If not interested: thank them and move on gracefully."
-                }
+                    "reply_handling": "If interested: offer a quick call or async exchange. If not interested: thank them and move on gracefully.",
+                },
             },
             {
                 "variation_label": "C",
@@ -639,9 +697,9 @@ def _build_fallback_distribution_assets(context: dict, channels: list[str], vari
                     "platform": "twitter",
                     "message": f"We're both connected with [mutual]. They mentioned you're one of the sharper people thinking about {primary_pain}. Curious what you're trying right now.",
                     "follow_up": "No worries if you're too busy - just wanted to connect with someone who's actually in the weeds on this stuff.",
-                    "reply_handling": "Keep it conversational. Share experiences, not pitches. Build relationship before any ask."
-                }
-            }
+                    "reply_handling": "Keep it conversational. Share experiences, not pitches. Build relationship before any ask.",
+                },
+            },
         ]
         for dv in dm_variations[:variations]:
             dv["asset_type"] = "cold_dm"
@@ -659,8 +717,8 @@ def _build_fallback_distribution_assets(context: dict, channels: list[str], vari
                     "visual_concept": "Relief and confidence after the transformation",
                     "target_emotion": "Relief, accomplishment, confidence",
                     "headline_overlay": headline,
-                    "cta_overlay": "See how it works"
-                }
+                    "cta_overlay": "See how it works",
+                },
             },
             {
                 "variation_label": "B",
@@ -671,8 +729,8 @@ def _build_fallback_distribution_assets(context: dict, channels: list[str], vari
                     "visual_concept": "The painful moment before the solution",
                     "target_emotion": "Recognition, empathy, frustration",
                     "headline_overlay": f"Tired of {primary_pain}?",
-                    "cta_overlay": "There's a better way"
-                }
+                    "cta_overlay": "There's a better way",
+                },
             },
             {
                 "variation_label": "C",
@@ -683,9 +741,9 @@ def _build_fallback_distribution_assets(context: dict, channels: list[str], vari
                     "visual_concept": "Life after the problem is solved",
                     "target_emotion": "Aspiration, success, ease",
                     "headline_overlay": headline,
-                    "cta_overlay": "Join them"
-                }
-            }
+                    "cta_overlay": "Join them",
+                },
+            },
         ]
         for iv in image_variations[:variations]:
             iv["asset_type"] = "image_ad_prompt"
@@ -712,10 +770,15 @@ def _build_fallback_distribution_assets(context: dict, channels: list[str], vari
 [25-30s] [back to face, genuine]
 "Link in bio if you want to stop wasting time on this."
 """,
-                    "text_overlays": [f"POV: {primary_pain} is ruining your day", "there's a better way", "5 minutes instead of 2 hours", "link in bio"],
+                    "text_overlays": [
+                        f"POV: {primary_pain} is ruining your day",
+                        "there's a better way",
+                        "5 minutes instead of 2 hours",
+                        "link in bio",
+                    ],
                     "cta": "Link in bio - thank me later",
-                    "music_mood": "Trending sound, slightly frustrated energy transitioning to hopeful"
-                }
+                    "music_mood": "Trending sound, slightly frustrated energy transitioning to hopeful",
+                },
             },
             {
                 "variation_label": "B",
@@ -737,8 +800,8 @@ def _build_fallback_distribution_assets(context: dict, channels: list[str], vari
 """,
                     "text_overlays": ["How I do this in 5 min", "Step 1", "Step 2", "Step 3", "save this"],
                     "cta": "Save this and follow for more",
-                    "music_mood": "Upbeat, tutorial-style, trending but not distracting"
-                }
+                    "music_mood": "Upbeat, tutorial-style, trending but not distracting",
+                },
             },
             {
                 "variation_label": "C",
@@ -763,9 +826,9 @@ def _build_fallback_distribution_assets(context: dict, channels: list[str], vari
 """,
                     "text_overlays": ["storytime", "I almost quit", "this changed everything", "link in bio"],
                     "cta": "Link in bio - this changed my life",
-                    "music_mood": "Emotional, storytelling vibe, soft background"
-                }
-            }
+                    "music_mood": "Emotional, storytelling vibe, soft background",
+                },
+            },
         ]
         for vv in video_variations[:variations]:
             vv["asset_type"] = "video_script"

@@ -14,7 +14,11 @@ class ExecutionService:
         self.resend = ResendClient()
 
     def send_email_batch(self, project_id, batch_id) -> dict:
-        batch = self.db.query(OutboundBatch).filter(OutboundBatch.id == batch_id, OutboundBatch.project_id == project_id).first()
+        batch = (
+            self.db.query(OutboundBatch)
+            .filter(OutboundBatch.id == batch_id, OutboundBatch.project_id == project_id)
+            .first()
+        )
         if not batch:
             raise ValueError("Batch not found")
 

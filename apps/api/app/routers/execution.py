@@ -56,10 +56,7 @@ def _normalize_email(email: str | None) -> str | None:
 
 def _get_current_launch_plan(db: Session, project_id: UUID) -> LaunchPlan | None:
     current = (
-        db.query(LaunchPlan)
-        .filter(LaunchPlan.project_id == project_id)
-        .order_by(LaunchPlan.created_at.desc())
-        .first()
+        db.query(LaunchPlan).filter(LaunchPlan.project_id == project_id).order_by(LaunchPlan.created_at.desc()).first()
     )
     if not current:
         return None
@@ -155,7 +152,7 @@ def _store_execution_assistant_reply(
         return
     db.add(
         AgentChatMessage(
-            project_id=str(project_id),
+            project_id=project_id,
             agent_type="execution",
             role="assistant",
             content=text,
@@ -189,7 +186,9 @@ def generate_execution_plan(
             mode=payload.mode,
         )
     except BackboardRequestError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Backboard execution planning failed: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Backboard execution planning failed: {exc}"
+        )
 
     plan = _get_current_launch_plan(db, project_id)
     if plan:
@@ -378,7 +377,9 @@ def generate_distribution_assets(
             mode=payload.mode,
         )
     except BackboardRequestError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Backboard distribution assets failed: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Backboard distribution assets failed: {exc}"
+        )
 
     # Save each asset to the database
     created_assets = []
@@ -408,13 +409,15 @@ def generate_distribution_assets(
         )
         db.add(asset)
         db.flush()
-        created_assets.append({
-            "id": str(asset.id),
-            "asset_type": storage_type,
-            "title": asset.title,
-            "status": asset.status,
-            "content": asset.content,
-        })
+        created_assets.append(
+            {
+                "id": str(asset.id),
+                "asset_type": storage_type,
+                "title": asset.title,
+                "status": asset.status,
+                "content": asset.content,
+            }
+        )
 
     AuditService(db).log(
         project_id,
@@ -761,7 +764,12 @@ def prepare_email_batch(
         "execution.email_batch_prepared",
         "outbound_batch",
         str(batch.id),
-        metadata={"agent_trace": trace, "mode": payload.mode, "advice": payload.advice, "messages_prepared": len(valid_drafts)},
+        metadata={
+            "agent_trace": trace,
+            "mode": payload.mode,
+            "advice": payload.advice,
+            "messages_prepared": len(valid_drafts),
+        },
     )
     _store_execution_assistant_reply(
         db,
@@ -856,7 +864,11 @@ def get_execution_state(
         .all()
     )
     plan_ids = [plan.id for plan in plans]
-    tasks = db.query(LaunchTask).filter(LaunchTask.launch_plan_id.in_(plan_ids)).order_by(LaunchTask.day_number.asc()).all() if plan_ids else []
+    tasks = (
+        db.query(LaunchTask).filter(LaunchTask.launch_plan_id.in_(plan_ids)).order_by(LaunchTask.day_number.asc()).all()
+        if plan_ids
+        else []
+    )
     assets = _dedupe_assets(
         db.query(Asset).filter(Asset.project_id == project_id).order_by(Asset.created_at.desc()).all()
     )
@@ -864,7 +876,10 @@ def get_execution_state(
         db.query(Contact).filter(Contact.project_id == project_id).order_by(Contact.created_at.desc()).all()
     )
     batches = _active_batches(
-        db.query(OutboundBatch).filter(OutboundBatch.project_id == project_id).order_by(OutboundBatch.created_at.desc()).all()
+        db.query(OutboundBatch)
+        .filter(OutboundBatch.project_id == project_id)
+        .order_by(OutboundBatch.created_at.desc())
+        .all()
     )
     batch_ids = [batch.id for batch in batches]
     messages = (
@@ -967,7 +982,9 @@ def update_task(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
 
     # Verify task belongs to a plan owned by this project
-    plan = db.query(LaunchPlan).filter(LaunchPlan.id == task.launch_plan_id, LaunchPlan.project_id == project_id).first()
+    plan = (
+        db.query(LaunchPlan).filter(LaunchPlan.id == task.launch_plan_id, LaunchPlan.project_id == project_id).first()
+    )
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found in this project")
 

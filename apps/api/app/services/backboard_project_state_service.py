@@ -128,7 +128,9 @@ class BackboardProjectStateService:
                                     "scope": assistant_ref["scope"],
                                     "assistant_id": replacement_id,
                                     "memory_id": self._extract_value(raw, ("memory_id", "id")),
-                                    "memory_operation_id": self._extract_value(raw, ("memory_operation_id", "operation_id")),
+                                    "memory_operation_id": self._extract_value(
+                                        raw, ("memory_operation_id", "operation_id")
+                                    ),
                                     "rotated_from": assistant_ref["assistant_id"],
                                 }
                             )
@@ -358,7 +360,12 @@ class BackboardProjectStateService:
             .order_by(PositioningVersion.created_at.desc())
             .all()
         )
-        plans = self.db.query(LaunchPlan).filter(LaunchPlan.project_id == project_id).order_by(LaunchPlan.created_at.desc()).all()
+        plans = (
+            self.db.query(LaunchPlan)
+            .filter(LaunchPlan.project_id == project_id)
+            .order_by(LaunchPlan.created_at.desc())
+            .all()
+        )
         plan_ids = [plan.id for plan in plans]
         tasks = (
             self.db.query(LaunchTask)
@@ -369,7 +376,9 @@ class BackboardProjectStateService:
             else []
         )
         assets = self.db.query(Asset).filter(Asset.project_id == project_id).order_by(Asset.created_at.desc()).all()
-        contacts = self.db.query(Contact).filter(Contact.project_id == project_id).order_by(Contact.created_at.desc()).all()
+        contacts = (
+            self.db.query(Contact).filter(Contact.project_id == project_id).order_by(Contact.created_at.desc()).all()
+        )
         batches = (
             self.db.query(OutboundBatch)
             .filter(OutboundBatch.project_id == project_id)
@@ -386,10 +395,7 @@ class BackboardProjectStateService:
             else []
         )
         approvals = (
-            self.db.query(Approval)
-            .filter(Approval.project_id == project_id)
-            .order_by(Approval.created_at.desc())
-            .all()
+            self.db.query(Approval).filter(Approval.project_id == project_id).order_by(Approval.created_at.desc()).all()
         )
         activity = (
             self.db.query(ActivityEvent)
@@ -450,7 +456,9 @@ class BackboardProjectStateService:
                     "id": str(research_run.id) if research_run else None,
                     "status": research_run.status if research_run else None,
                     "summary": research_run.summary if research_run else None,
-                    "completed_at": research_run.completed_at.isoformat() if research_run and research_run.completed_at else None,
+                    "completed_at": research_run.completed_at.isoformat()
+                    if research_run and research_run.completed_at
+                    else None,
                 },
                 "competitors": [
                     {
@@ -501,7 +509,9 @@ class BackboardProjectStateService:
                 "plans": [
                     {
                         "id": str(row.id),
-                        "positioning_version_id": str(row.positioning_version_id) if row.positioning_version_id else None,
+                        "positioning_version_id": str(row.positioning_version_id)
+                        if row.positioning_version_id
+                        else None,
                         "primary_channel": row.primary_channel,
                         "secondary_channels": row.secondary_channels,
                         "kpis": row.kpis,
@@ -597,7 +607,16 @@ class BackboardProjectStateService:
         if row.memory_key.startswith("backboard_") and isinstance(value, dict):
             compact = {
                 key: value.get(key)
-                for key in ("assistant_id", "thread_id", "mode", "memory_mode", "status", "reason", "stage", "synced_at")
+                for key in (
+                    "assistant_id",
+                    "thread_id",
+                    "mode",
+                    "memory_mode",
+                    "status",
+                    "reason",
+                    "stage",
+                    "synced_at",
+                )
                 if key in value
             }
             if "backboard_memory_sync" in value and isinstance(value["backboard_memory_sync"], dict):
@@ -630,7 +649,9 @@ class BackboardProjectStateService:
     def _rotate_project_state_assistant(self, project_id: str) -> str:
         project = self.db.query(Project).filter(Project.id == project_id).first()
         project_name = project.name if project and project.name else "project"
-        previous = get_project_memory_value(self.db, project_id, "backboard_project_state_assistant", {}).get("assistant_id")
+        previous = get_project_memory_value(self.db, project_id, "backboard_project_state_assistant", {}).get(
+            "assistant_id"
+        )
         assistant_id = self.client.create_assistant(
             name=f"{project_name}-project-state",
             system_prompt=PROJECT_STATE_PROMPT,

@@ -21,7 +21,12 @@ if not settings.backboard_api_key:
 
 # Startup configuration summary
 logger.info("Starting %s (env=%s, auth=%s)", settings.app_name, settings.app_env, settings.auth_mode)
-logger.info("Database: %s", "configured" if settings.supabase_db_url != "postgresql+psycopg://postgres:postgres@localhost:5432/postgres" else "using default localhost")
+logger.info(
+    "Database: %s",
+    "configured"
+    if settings.supabase_db_url != "postgresql+psycopg://postgres:postgres@localhost:5432/postgres"
+    else "using default localhost",
+)
 logger.info("Resend email: %s", "configured" if settings.resend_api_key else "disabled (mock mode)")
 logger.info("Web app URL: %s", settings.web_app_url)
 

@@ -36,7 +36,7 @@ export function DeleteProjectButton({ projectId, projectName }: DeleteProjectBut
   if (showConfirm) {
     return (
       <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-4">
-        <p className="text-sm font-medium text-red-400">Delete "{projectName}"?</p>
+        <p className="text-sm font-medium text-red-400">Delete &quot;{projectName}&quot;?</p>
         <p className="mt-1 text-sm text-fg-muted">
           This action cannot be undone. All project data will be permanently deleted.
         </p>
